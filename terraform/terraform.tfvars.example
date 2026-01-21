@@ -1,0 +1,32 @@
+# Terraform variables for email server
+# Copy this file to terraform.tfvars and fill in your values
+
+# AWS Region
+aws_region = "us-east-1"
+
+# Your email domain
+domain = "example.com"
+
+# Mail server hostname (FQDN)
+mail_hostname = "mail.example.com"
+
+# EC2 instance type
+instance_type = "t3.small"
+
+# SSH key pair name (must exist in AWS)
+key_name = "your-ssh-key"
+
+# EBS data volume size in GB
+data_volume_size = 50
+
+# Route53 hosted zone ID for your domain
+route53_zone_id = "Z1234567890ABC"
+
+# Environment name for tagging
+environment = "production"
+
+# Project name for resource naming and tagging
+project = "email-server"
+
+# Optional: Specific NixOS AMI ID (leave empty to use latest)
+nixos_ami = ""
