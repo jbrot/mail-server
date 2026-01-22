@@ -125,6 +125,11 @@
           mail-server-integration = import ./nix/tests/mail-server-test.nix {
             inherit pkgs self;
           };
+
+          # Standalone OpenSMTPd test (no Dovecot or Rspamd needed)
+          opensmtpd-standalone = import ./nix/tests/opensmtpd-test.nix {
+            inherit pkgs self;
+          };
         } else {})
       );
     };

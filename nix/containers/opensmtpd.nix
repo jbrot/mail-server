@@ -39,8 +39,10 @@ let
     chmod 711 /var/spool/smtpd
 
     # Subdirectories have different ownership
-    chown smtpq:root /var/spool/smtpd/offline
+    # offline: owned by root:smtpq, mode 770
+    chown root:smtpq /var/spool/smtpd/offline
     chmod 770 /var/spool/smtpd/offline
+    # purge: owned by smtpq:root, mode 700
     chown smtpq:root /var/spool/smtpd/purge
     chmod 700 /var/spool/smtpd/purge
 
