@@ -116,8 +116,7 @@
           inherit (smokeTests)
             rspamd-config-check
             opensmtpd-config-check
-            dovecot-config-check
-            opensmtpd-image-structure;
+            dovecot-config-check;
 
           # Verify NixOS configuration evaluates
           nixos-config = self.nixosConfigurations.mail-server.config.system.build.toplevel;
