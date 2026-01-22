@@ -66,7 +66,8 @@ pkgs.testers.runNixOSTest {
         ${pkgs.openssl}/bin/openssl req -x509 -newkey rsa:2048 -nodes \
           -keyout /data/certs/key.pem -out /data/certs/fullchain.pem \
           -days 1 -subj "/CN=localhost"
-        chmod 644 /data/certs/*.pem
+        chmod 644 /data/certs/fullchain.pem
+        chmod 640 /data/certs/key.pem
         chown -R 5000:5000 /data/mail
       '';
     };

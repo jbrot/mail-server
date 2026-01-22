@@ -70,15 +70,18 @@ pkgs.dockerTools.buildLayeredImage {
 
   extraCommands = ''
     # Create directory structure
-    mkdir -p etc/rspamd/local.d
-    mkdir -p etc/rspamd/override.d
     mkdir -p var/lib/rspamd
     mkdir -p var/run/rspamd
     mkdir -p data/rspamd/dkim
     mkdir -p tmp
 
-    # Copy default rspamd config
-    cp -r ${rspamd}/etc/rspamd/* etc/rspamd/
+    # Remove any existing etc/rspamd (may be symlinks from contents)
+    rm -rf etc/rspamd
+
+    # Copy default rspamd config (need actual files, not symlinks)
+    mkdir -p etc/rspamd/local.d
+    mkdir -p etc/rspamd/override.d
+    cp -rL ${rspamd}/etc/rspamd/* etc/rspamd/
 
     # Copy passwd and group files
     cp ${passwdFile} etc/passwd

@@ -28,13 +28,21 @@ let
 
     # Create required directories
     mkdir -p /var/spool/smtpd
+    mkdir -p /var/spool/smtpd/offline
+    mkdir -p /var/spool/smtpd/purge
     mkdir -p /var/empty
     mkdir -p /data/mail
     mkdir -p /data/certs
 
-    # Set permissions
-    chown -R smtpd:smtpd /var/spool/smtpd
-    chmod 700 /var/spool/smtpd
+    # Set permissions - spool must be owned by root with 711
+    chown root:root /var/spool/smtpd
+    chmod 711 /var/spool/smtpd
+
+    # Subdirectories have different ownership
+    chown smtpq:root /var/spool/smtpd/offline
+    chmod 770 /var/spool/smtpd/offline
+    chown smtpq:root /var/spool/smtpd/purge
+    chmod 700 /var/spool/smtpd/purge
 
     # Check for config file
     if [ ! -f /etc/smtpd/smtpd.conf ]; then
@@ -67,6 +75,7 @@ pkgs.dockerTools.buildLayeredImage {
   extraCommands = ''
     # Create directory structure
     mkdir -p etc/smtpd
+    mkdir -p etc/ssl/certs
     mkdir -p var/spool/smtpd
     mkdir -p var/empty
     mkdir -p data/mail
@@ -81,6 +90,9 @@ pkgs.dockerTools.buildLayeredImage {
     echo "passwd: files" > etc/nsswitch.conf
     echo "group: files" >> etc/nsswitch.conf
     echo "hosts: files dns" >> etc/nsswitch.conf
+
+    # Create symlink for CA certificates (OpenSMTPd expects this path)
+    ln -sf ${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt etc/ssl/certs/ca-certificates.crt
   '';
 
   config = {
