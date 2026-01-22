@@ -104,12 +104,20 @@
       checks = forAllSystems (system:
         let
           pkgs = nixpkgsFor.${system};
+          smokeTests = import ./nix/tests/container-smoke-tests.nix { inherit pkgs self; };
         in
         {
           # Verify container images build
           opensmtpd-image = self.packages.${system}.opensmtpd-image;
           dovecot-image = self.packages.${system}.dovecot-image;
           rspamd-image = self.packages.${system}.rspamd-image;
+
+          # Config validation tests (fast, no containers needed)
+          inherit (smokeTests)
+            rspamd-config-check
+            opensmtpd-config-check
+            dovecot-config-check
+            opensmtpd-image-structure;
 
           # Verify NixOS configuration evaluates
           nixos-config = self.nixosConfigurations.mail-server.config.system.build.toplevel;
