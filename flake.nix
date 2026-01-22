@@ -113,7 +113,12 @@
 
           # Verify NixOS configuration evaluates
           nixos-config = self.nixosConfigurations.mail-server.config.system.build.toplevel;
-        }
+        } // (if system == "x86_64-linux" then {
+          # VM integration test (only on x86_64-linux due to QEMU)
+          mail-server-integration = import ./nix/tests/mail-server-test.nix {
+            inherit pkgs self;
+          };
+        } else {})
       );
     };
 }

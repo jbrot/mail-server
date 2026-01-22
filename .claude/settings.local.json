@@ -1,7 +1,13 @@
 {
   "permissions": {
     "allow": [
-      "Bash(chmod:*)"
+      "Bash(chmod:*)",
+      "Bash(tree:*)",
+      "WebSearch",
+      "WebFetch(domain:nix.dev)",
+      "Bash(nix flake check:*)",
+      "Bash(nix flake show:*)",
+      "Bash(git add:*)"
     ]
   }
 }

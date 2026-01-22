@@ -23,9 +23,6 @@
     };
   };
 
-  # Allow unfree packages
-  nixpkgs.config.allowUnfree = true;
-
   # System packages
   environment.systemPackages = with pkgs; [
     # Basic utilities
@@ -61,8 +58,9 @@
     defaultNetwork.settings.dns_enabled = true;
   };
 
-  # ECR credential helper
-  environment.etc."containers/registries.conf".text = ''
+  # ECR credential helper - additional registry configuration
+  # Note: Uses mkForce to override the default registries.conf from containers module
+  environment.etc."containers/registries.conf".text = lib.mkForce ''
     [registries.search]
     registries = ['docker.io']
 
