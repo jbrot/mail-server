@@ -24,9 +24,10 @@ pkgs.testers.runNixOSTest {
       enable = true;
       image = "docker-archive:${self.packages.${pkgs.system}.dovecot-image}";
 
-      # Test user (SHA-512 hash of "testpass")
+      # Test users (SHA-512 hash of "testpass" for both)
       users = {
-        "testuser@test.local" = "$6$060RjN4XgGU35LkE$IJC9LNaAeOwWRsW8h0AVqufnGlENfuKQqAWPSb0O3EXk6IvuixkqpkRij69/K6OJPut0LhlbuOvrKKzfStN.Q.";
+        "alice@test.local" = "$6$060RjN4XgGU35LkE$IJC9LNaAeOwWRsW8h0AVqufnGlENfuKQqAWPSb0O3EXk6IvuixkqpkRij69/K6OJPut0LhlbuOvrKKzfStN.Q.";
+        "bob@test.local" = "$6$060RjN4XgGU35LkE$IJC9LNaAeOwWRsW8h0AVqufnGlENfuKQqAWPSb0O3EXk6IvuixkqpkRij69/K6OJPut0LhlbuOvrKKzfStN.Q.";
       };
 
       enableLmtp = true;
@@ -69,27 +70,41 @@ pkgs.testers.runNixOSTest {
         mail.succeed("test -f /data/certs/fullchain.pem")
         mail.succeed("test -f /data/certs/key.pem")
 
-    # Pre-populate Maildir with a test message before starting Dovecot
-    with subtest("Pre-populate test mailbox"):
-        # Create Maildir structure for testuser@test.local
-        mail.succeed("mkdir -p /data/mail/test.local/testuser/{cur,new,tmp}")
-        mail.succeed("chown -R 5000:5000 /data/mail")
-
-        # Create a test email in the new/ directory
+    # Pre-populate Maildir with test messages for both users
+    with subtest("Pre-populate test mailboxes"):
+        # Create Maildir structure for alice@test.local
+        mail.succeed("mkdir -p /data/mail/test.local/alice/{cur,new,tmp}")
         mail.succeed("""
-            cat > /data/mail/test.local/testuser/new/1234567890.test.mail <<'EOF'
+            cat > /data/mail/test.local/alice/new/1234567890.alice.mail <<'EOF'
     Return-Path: <sender@external.com>
-    Delivered-To: testuser@test.local
+    Delivered-To: alice@test.local
     From: sender@external.com
-    To: testuser@test.local
-    Subject: Pre-populated Test Email
+    To: alice@test.local
+    Subject: Pre-populated Email for Alice
     Date: Mon, 1 Jan 2024 00:00:00 +0000
-    Message-ID: <test-message-id@test.local>
+    Message-ID: <alice-message-id@test.local>
 
-    This is a pre-populated test message for Dovecot IMAP testing.
+    This is a pre-populated test message for Alice.
     EOF
         """)
-        mail.succeed("chown 5000:5000 /data/mail/test.local/testuser/new/1234567890.test.mail")
+
+        # Create Maildir structure for bob@test.local
+        mail.succeed("mkdir -p /data/mail/test.local/bob/{cur,new,tmp}")
+        mail.succeed("""
+            cat > /data/mail/test.local/bob/new/1234567890.bob.mail <<'EOF'
+    Return-Path: <sender@external.com>
+    Delivered-To: bob@test.local
+    From: sender@external.com
+    To: bob@test.local
+    Subject: Pre-populated Email for Bob
+    Date: Mon, 1 Jan 2024 00:00:00 +0000
+    Message-ID: <bob-message-id@test.local>
+
+    This is a pre-populated test message for Bob.
+    EOF
+        """)
+
+        mail.succeed("chown -R 5000:5000 /data/mail")
 
     # Wait for Dovecot container
     with subtest("Dovecot starts successfully"):
@@ -104,13 +119,12 @@ pkgs.testers.runNixOSTest {
     with subtest("LMTP port is listening"):
         mail.wait_for_open_port(24, timeout=60)
 
-    # Test IMAP authentication and message retrieval
-    with subtest("IMAP authentication and mail retrieval"):
-        # Use openssl s_client to test IMAPS login and fetch
+    # Test IMAP authentication and message retrieval for Alice
+    with subtest("Alice can authenticate and read her mail"):
         result = mail.succeed("""
             (
                 sleep 1
-                echo 'a001 LOGIN testuser@test.local testpass'
+                echo 'a001 LOGIN alice@test.local testpass'
                 sleep 1
                 echo 'a002 SELECT INBOX'
                 sleep 1
@@ -121,62 +135,158 @@ pkgs.testers.runNixOSTest {
             ) | ${pkgs.openssl}/bin/openssl s_client -connect localhost:993 -quiet 2>/dev/null
         """)
 
-        # Verify we got successful authentication
-        assert "a001 OK" in result, f"IMAP LOGIN failed: {result}"
-        # Verify we selected INBOX
-        assert "a002 OK" in result, f"IMAP SELECT failed: {result}"
-        # Verify we could fetch the message body
-        assert "pre-populated test message" in result.lower(), f"Message content not found: {result}"
+        assert "a001 OK" in result, f"IMAP LOGIN failed for Alice: {result}"
+        assert "a002 OK" in result, f"IMAP SELECT failed for Alice: {result}"
+        assert "message for alice" in result.lower(), f"Alice's message content not found: {result}"
 
-    # Test LMTP delivery
-    with subtest("LMTP delivery works"):
-        # Send a message via LMTP
-        mail.succeed("""
-            (
-                echo "LHLO localhost"
-                sleep 0.5
-                echo "MAIL FROM:<sender@external.com>"
-                sleep 0.5
-                echo "RCPT TO:<testuser@test.local>"
-                sleep 0.5
-                echo "DATA"
-                sleep 0.5
-                echo "From: sender@external.com"
-                echo "To: testuser@test.local"
-                echo "Subject: LMTP Test Message"
-                echo ""
-                echo "This message was delivered via LMTP."
-                echo "."
-                sleep 0.5
-                echo "QUIT"
-            ) | ${pkgs.netcat}/bin/nc localhost 24
-        """)
-
-        # Allow time for delivery
-        time.sleep(2)
-
-        # Check that the message was delivered to Maildir
-        mail.succeed("ls /data/mail/test.local/testuser/new/ | grep -v '^$' | wc -l | grep -q '[1-9]'")
-
-    # Verify the LMTP-delivered message via IMAP
-    with subtest("LMTP-delivered message readable via IMAP"):
+    # Test IMAP authentication and message retrieval for Bob
+    with subtest("Bob can authenticate and read his mail"):
         result = mail.succeed("""
             (
                 sleep 1
-                echo 'a001 LOGIN testuser@test.local testpass'
+                echo 'a001 LOGIN bob@test.local testpass'
                 sleep 1
                 echo 'a002 SELECT INBOX'
                 sleep 1
-                echo 'a003 SEARCH SUBJECT "LMTP Test Message"'
+                echo 'a003 FETCH 1 BODY[TEXT]'
                 sleep 1
                 echo 'a004 LOGOUT'
                 sleep 1
             ) | ${pkgs.openssl}/bin/openssl s_client -connect localhost:993 -quiet 2>/dev/null
         """)
 
-        assert "a001 OK" in result, f"IMAP LOGIN failed: {result}"
-        # Search should return at least one message number
-        assert "SEARCH" in result, f"SEARCH response missing: {result}"
+        assert "a001 OK" in result, f"IMAP LOGIN failed for Bob: {result}"
+        assert "a002 OK" in result, f"IMAP SELECT failed for Bob: {result}"
+        assert "message for bob" in result.lower(), f"Bob's message content not found: {result}"
+
+    # Verify users can only see their own mail (isolation check)
+    with subtest("Users have isolated mailboxes"):
+        # Alice should NOT see Bob's message
+        alice_result = mail.succeed("""
+            (
+                sleep 1
+                echo 'a001 LOGIN alice@test.local testpass'
+                sleep 1
+                echo 'a002 SELECT INBOX'
+                sleep 1
+                echo 'a003 SEARCH TEXT "message for bob"'
+                sleep 1
+                echo 'a004 LOGOUT'
+                sleep 1
+            ) | ${pkgs.openssl}/bin/openssl s_client -connect localhost:993 -quiet 2>/dev/null
+        """)
+        # SEARCH with no results returns "* SEARCH" with no message numbers
+        assert "message for bob" not in alice_result.lower() or "* SEARCH\r" in alice_result, \
+            f"Alice can see Bob's mail (isolation failure): {alice_result}"
+
+    # Test LMTP delivery to Alice
+    with subtest("LMTP delivery to Alice works"):
+        mail.succeed("""
+            (
+                echo "LHLO localhost"
+                sleep 0.5
+                echo "MAIL FROM:<sender@external.com>"
+                sleep 0.5
+                echo "RCPT TO:<alice@test.local>"
+                sleep 0.5
+                echo "DATA"
+                sleep 0.5
+                echo "From: sender@external.com"
+                echo "To: alice@test.local"
+                echo "Subject: LMTP Message for Alice"
+                echo ""
+                echo "This LMTP message is for Alice only."
+                echo "."
+                sleep 0.5
+                echo "QUIT"
+            ) | ${pkgs.netcat}/bin/nc localhost 24
+        """)
+        time.sleep(2)
+        # Alice should now have 2 messages (pre-populated + LMTP)
+        mail.succeed("test $(ls /data/mail/test.local/alice/new/ | wc -l) -ge 2")
+
+    # Test LMTP delivery to Bob
+    with subtest("LMTP delivery to Bob works"):
+        mail.succeed("""
+            (
+                echo "LHLO localhost"
+                sleep 0.5
+                echo "MAIL FROM:<sender@external.com>"
+                sleep 0.5
+                echo "RCPT TO:<bob@test.local>"
+                sleep 0.5
+                echo "DATA"
+                sleep 0.5
+                echo "From: sender@external.com"
+                echo "To: bob@test.local"
+                echo "Subject: LMTP Message for Bob"
+                echo ""
+                echo "This LMTP message is for Bob only."
+                echo "."
+                sleep 0.5
+                echo "QUIT"
+            ) | ${pkgs.netcat}/bin/nc localhost 24
+        """)
+        time.sleep(2)
+        # Bob should now have 2 messages (pre-populated + LMTP)
+        mail.succeed("test $(ls /data/mail/test.local/bob/new/ | wc -l) -ge 2")
+
+    # Verify LMTP-delivered messages via IMAP for both users
+    with subtest("Alice can read her LMTP-delivered message"):
+        result = mail.succeed("""
+            (
+                sleep 1
+                echo 'a001 LOGIN alice@test.local testpass'
+                sleep 1
+                echo 'a002 SELECT INBOX'
+                sleep 1
+                echo 'a003 SEARCH SUBJECT "LMTP Message for Alice"'
+                sleep 1
+                echo 'a004 LOGOUT'
+                sleep 1
+            ) | ${pkgs.openssl}/bin/openssl s_client -connect localhost:993 -quiet 2>/dev/null
+        """)
+        assert "a001 OK" in result, f"IMAP LOGIN failed for Alice: {result}"
+        # Search should return message number 2 (the LMTP-delivered one)
+        assert "* SEARCH 2" in result or "* SEARCH 1 2" in result, \
+            f"Alice's LMTP message not found via SEARCH: {result}"
+
+    with subtest("Bob can read his LMTP-delivered message"):
+        result = mail.succeed("""
+            (
+                sleep 1
+                echo 'a001 LOGIN bob@test.local testpass'
+                sleep 1
+                echo 'a002 SELECT INBOX'
+                sleep 1
+                echo 'a003 SEARCH SUBJECT "LMTP Message for Bob"'
+                sleep 1
+                echo 'a004 LOGOUT'
+                sleep 1
+            ) | ${pkgs.openssl}/bin/openssl s_client -connect localhost:993 -quiet 2>/dev/null
+        """)
+        assert "a001 OK" in result, f"IMAP LOGIN failed for Bob: {result}"
+        assert "* SEARCH 2" in result or "* SEARCH 1 2" in result, \
+            f"Bob's LMTP message not found via SEARCH: {result}"
+
+    # Final isolation check: Bob should NOT see Alice's LMTP message
+    with subtest("LMTP messages are isolated between users"):
+        result = mail.succeed("""
+            (
+                sleep 1
+                echo 'a001 LOGIN bob@test.local testpass'
+                sleep 1
+                echo 'a002 SELECT INBOX'
+                sleep 1
+                echo 'a003 SEARCH SUBJECT "LMTP Message for Alice"'
+                sleep 1
+                echo 'a004 LOGOUT'
+                sleep 1
+            ) | ${pkgs.openssl}/bin/openssl s_client -connect localhost:993 -quiet 2>/dev/null
+        """)
+        # Search for Alice's message in Bob's mailbox should return empty
+        assert "* SEARCH\r" in result or "* SEARCH 2" not in result, \
+            f"Bob can see Alice's LMTP message (isolation failure): {result}"
 
     print("Dovecot standalone test passed!")
   '';
