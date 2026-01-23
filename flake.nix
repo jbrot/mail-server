@@ -130,6 +130,11 @@
           opensmtpd-standalone = import ./nix/tests/opensmtpd-test.nix {
             inherit pkgs self;
           };
+
+          # Standalone Dovecot test (IMAP/LMTP only)
+          dovecot-standalone = import ./nix/tests/dovecot-test.nix {
+            inherit pkgs self;
+          };
         } else {})
       );
     };

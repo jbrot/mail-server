@@ -71,6 +71,9 @@ pkgs.dockerTools.buildLayeredImage {
     mkdir -p data/certs
     mkdir -p tmp
 
+    # Symlink dovecot modules to the nix store location
+    ln -s ${dovecot}/lib/dovecot etc/dovecot/modules
+
     # Copy passwd and group files
     cp ${passwdFile} etc/passwd
     cp ${groupFile} etc/group
