@@ -18,18 +18,28 @@ let
     table aliases file:/etc/smtpd/aliases
     table domains file:/etc/smtpd/domains
     ${if cfg.localDelivery then "" else "table virtuals file:/etc/smtpd/virtuals"}
+    ${if cfg.credentials != {} then "table credentials file:/etc/smtpd/credentials" else ""}
 
     # Filters
+    filter check_dyndns phase connect match rdns regex { '.*\.dyn\..*', '.*\.dsl\..*' } \
+        disconnect "550 no residential connections"
+    
+    filter check_rdns phase connect match !rdns \
+        disconnect "550 no rDNS is so 80s"
+    
+    filter check_fcrdns phase connect match !fcrdns \
+        disconnect "550 no FCrDNS is so 80s"
+
     ${lib.optionalString cfg.enableRspamd ''
     filter rspamd proc-exec "filter-rspamd"
     ''}
 
     # Listen on all interfaces
     # Port 25 - SMTP (for receiving mail from other servers)
-    listen on 0.0.0.0 port 25 tls pki ${cfg.domain}${lib.optionalString cfg.enableRspamd " filter rspamd"}
+    listen on 0.0.0.0 port 25 tls pki ${cfg.domain} filter { check_dyndns, check_rdns, check_fcrdns${lib.optionalString cfg.enableRspamd ", rspamd"} }
 
     # Port 587 - Submission (STARTTLS, for client submission)
-    listen on 0.0.0.0 port 587 tls-require pki ${cfg.domain} auth${lib.optionalString cfg.enableRspamd " filter rspamd"}
+    listen on 0.0.0.0 port 587 tls-require pki ${cfg.domain} auth ${if cfg.credentials != {} then "<credentials>" else ""}${lib.optionalString cfg.enableRspamd " filter rspamd"}
 
     # Actions
     ${if cfg.localDelivery then ''
@@ -37,14 +47,20 @@ let
     '' else ''
     action "local_mail" lmtp localhost:24 virtual <virtuals>
     ''}
-    action "outbound" relay
+    action "outbound" relay helo ${cfg.domain}
 
     # Matching rules
     # Accept mail for our domains
     match from any for domain <domains> action "local_mail"
 
-    # Allow authenticated users to send mail
+    # Allow local connections to send to local domains
+    match from local for domain <domains> action "local_mail"
+
+    # Allow authenticated users to send mail anywhere
     match from any auth for any action "outbound"
+
+    # Allow local connections to relay outbound
+    match from local for any action "outbound"
 
     # Reject everything else is implicit
   '';
@@ -98,6 +114,13 @@ in
       default = {};
       example = { "@example.com" = "vmail"; };
       description = "Virtual user mappings for LMTP delivery";
+    };
+
+    credentials = lib.mkOption {
+      type = lib.types.attrsOf lib.types.str;
+      default = {};
+      example = { "user@example.com" = "$6$..."; };
+      description = "User credentials for SMTP authentication (user = password hash)";
     };
   };
 
@@ -170,6 +193,13 @@ in
           lib.mapAttrsToList (pattern: target: "${pattern}    ${target}") cfg.virtuals
         ) + "\n";
         mode = "0644";
+      };
+    } // lib.optionalAttrs (cfg.credentials != {}) {
+      "smtpd/credentials" = {
+        text = lib.concatStringsSep "\n" (
+          lib.mapAttrsToList (user: pass: "${user} ${pass}") cfg.credentials
+        ) + "\n";
+        mode = "0640";
       };
     };
   };

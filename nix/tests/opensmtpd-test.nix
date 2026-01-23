@@ -23,6 +23,10 @@ pkgs.testers.runNixOSTest {
         postmaster = "root";
         abuse = "root";
       };
+      # Test credentials (SHA-512 hash of "testpass")
+      credentials = {
+        "testuser@test.local" = "$6$060RjN4XgGU35LkE$IJC9LNaAeOwWRsW8h0AVqufnGlENfuKQqAWPSb0O3EXk6IvuixkqpkRij69/K6OJPut0LhlbuOvrKKzfStN.Q.";
+      };
     };
 
     # Generate self-signed certs on boot
@@ -118,6 +122,31 @@ pkgs.testers.runNixOSTest {
         # Verify mail was delivered to mbox (container's /var/mail is mounted from /data/mail)
         mail.succeed("test -f /data/mail/root")
         mail.succeed("grep -q 'Subject: Test Email' /data/mail/root")
+
+    # Test authenticated submission (sending mail via port 587)
+    with subtest("Authenticated submission works"):
+        # Send email via authenticated SMTP submission
+        mail.succeed(
+            "${pkgs.swaks}/bin/swaks "
+            "--to root@test.local "
+            "--from testuser@test.local "
+            "--server localhost "
+            "--port 587 "
+            "--tls "
+            "--tls-verify "
+            "--tls-ca-path /data/certs/fullchain.pem "
+            "--auth-user testuser@test.local "
+            "--auth-password testpass "
+            "--timeout 30 "
+            "--header 'Subject: Authenticated Test' "
+            "--body 'This was sent via authenticated submission.'"
+        )
+
+        # Allow time for delivery
+        time.sleep(2)
+
+        # Verify the authenticated mail was delivered
+        mail.succeed("grep -q 'Subject: Authenticated Test' /data/mail/root")
 
     print("OpenSMTPd standalone test passed!")
   '';
