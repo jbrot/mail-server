@@ -8,8 +8,16 @@ pkgs.testers.runNixOSTest {
 
   nodes.mail = { config, pkgs, lib, ... }: {
     imports = [
+      ../nixos/test-certs.nix
       ../nixos/opensmtpd.nix
     ];
+
+    # === Test Certificate Generation ===
+    services.testCerts = {
+      enable = true;
+      domain = "localhost";
+      certPath = "/data/certs";
+    };
 
     # === OpenSMTPd Configuration ===
     services.opensmtpdContainer = {
@@ -27,25 +35,6 @@ pkgs.testers.runNixOSTest {
       credentials = {
         "testuser@test.local" = "$6$060RjN4XgGU35LkE$IJC9LNaAeOwWRsW8h0AVqufnGlENfuKQqAWPSb0O3EXk6IvuixkqpkRij69/K6OJPut0LhlbuOvrKKzfStN.Q.";
       };
-    };
-
-    # Generate self-signed certs on boot
-    systemd.services.generate-test-certs = {
-      description = "Generate self-signed certificates for testing";
-      wantedBy = [ "multi-user.target" ];
-      before = [ "podman-opensmtpd.service" ];
-      serviceConfig = {
-        Type = "oneshot";
-        RemainAfterExit = true;
-      };
-      script = ''
-        mkdir -p /data/certs /data/mail
-        ${pkgs.openssl}/bin/openssl req -x509 -newkey rsa:2048 -nodes \
-          -keyout /data/certs/key.pem -out /data/certs/fullchain.pem \
-          -days 1 -subj "/CN=localhost"
-        chmod 644 /data/certs/fullchain.pem
-        chmod 640 /data/certs/key.pem
-      '';
     };
 
     # Ensure generate-test-certs runs before container
