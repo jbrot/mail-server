@@ -26,8 +26,8 @@ pkgs.testers.runNixOSTest {
 
       # Test users (SHA-512 hash of "testpass" for both)
       users = {
-        "alice@test.local" = "$6$060RjN4XgGU35LkE$IJC9LNaAeOwWRsW8h0AVqufnGlENfuKQqAWPSb0O3EXk6IvuixkqpkRij69/K6OJPut0LhlbuOvrKKzfStN.Q.";
-        "bob@test.local" = "$6$060RjN4XgGU35LkE$IJC9LNaAeOwWRsW8h0AVqufnGlENfuKQqAWPSb0O3EXk6IvuixkqpkRij69/K6OJPut0LhlbuOvrKKzfStN.Q.";
+        "alice" = "$6$060RjN4XgGU35LkE$IJC9LNaAeOwWRsW8h0AVqufnGlENfuKQqAWPSb0O3EXk6IvuixkqpkRij69/K6OJPut0LhlbuOvrKKzfStN.Q.";
+        "bob" = "$6$060RjN4XgGU35LkE$IJC9LNaAeOwWRsW8h0AVqufnGlENfuKQqAWPSb0O3EXk6IvuixkqpkRij69/K6OJPut0LhlbuOvrKKzfStN.Q.";
       };
 
       enableLmtp = true;
@@ -73,9 +73,9 @@ pkgs.testers.runNixOSTest {
     # Pre-populate Maildir with test messages for both users
     with subtest("Pre-populate test mailboxes"):
         # Create Maildir structure for alice@test.local
-        mail.succeed("mkdir -p /data/mail/test.local/alice/{cur,new,tmp}")
+        mail.succeed("mkdir -p /data/mail/alice/{cur,new,tmp}")
         mail.succeed("""
-            cat > /data/mail/test.local/alice/new/1234567890.alice.mail <<'EOF'
+            cat > /data/mail/alice/new/1234567890.alice.mail <<'EOF'
     Return-Path: <sender@external.com>
     Delivered-To: alice@test.local
     From: sender@external.com
@@ -89,9 +89,9 @@ pkgs.testers.runNixOSTest {
         """)
 
         # Create Maildir structure for bob@test.local
-        mail.succeed("mkdir -p /data/mail/test.local/bob/{cur,new,tmp}")
+        mail.succeed("mkdir -p /data/mail/bob/{cur,new,tmp}")
         mail.succeed("""
-            cat > /data/mail/test.local/bob/new/1234567890.bob.mail <<'EOF'
+            cat > /data/mail/bob/new/1234567890.bob.mail <<'EOF'
     Return-Path: <sender@external.com>
     Delivered-To: bob@test.local
     From: sender@external.com
@@ -124,7 +124,7 @@ pkgs.testers.runNixOSTest {
         result = mail.succeed("""
             (
                 sleep 1
-                echo 'a001 LOGIN alice@test.local testpass'
+                echo 'a001 LOGIN alice testpass'
                 sleep 1
                 echo 'a002 SELECT INBOX'
                 sleep 1
@@ -144,7 +144,7 @@ pkgs.testers.runNixOSTest {
         result = mail.succeed("""
             (
                 sleep 1
-                echo 'a001 LOGIN bob@test.local testpass'
+                echo 'a001 LOGIN bob testpass'
                 sleep 1
                 echo 'a002 SELECT INBOX'
                 sleep 1
@@ -165,7 +165,7 @@ pkgs.testers.runNixOSTest {
         alice_result = mail.succeed("""
             (
                 sleep 1
-                echo 'a001 LOGIN alice@test.local testpass'
+                echo 'a001 LOGIN alice testpass'
                 sleep 1
                 echo 'a002 SELECT INBOX'
                 sleep 1
@@ -187,7 +187,7 @@ pkgs.testers.runNixOSTest {
                 sleep 0.5
                 echo "MAIL FROM:<sender@external.com>"
                 sleep 0.5
-                echo "RCPT TO:<alice@test.local>"
+                echo "RCPT TO:<alice>"
                 sleep 0.5
                 echo "DATA"
                 sleep 0.5
@@ -202,8 +202,9 @@ pkgs.testers.runNixOSTest {
             ) | ${pkgs.netcat}/bin/nc localhost 24
         """)
         time.sleep(2)
-        # Alice should now have 2 messages (pre-populated + LMTP)
-        mail.succeed("test $(ls /data/mail/test.local/alice/new/ | wc -l) -ge 2")
+        # Alice should now have exactly 2 messages (pre-populated + LMTP)
+        # Exclude dovecot files with ! -name 'dovecot*'
+        mail.succeed("test $(find /data/mail/alice -type f ! -name 'dovecot*' | wc -l) -eq 2")
 
     # Test LMTP delivery to Bob
     with subtest("LMTP delivery to Bob works"):
@@ -213,7 +214,7 @@ pkgs.testers.runNixOSTest {
                 sleep 0.5
                 echo "MAIL FROM:<sender@external.com>"
                 sleep 0.5
-                echo "RCPT TO:<bob@test.local>"
+                echo "RCPT TO:<bob>"
                 sleep 0.5
                 echo "DATA"
                 sleep 0.5
@@ -228,15 +229,16 @@ pkgs.testers.runNixOSTest {
             ) | ${pkgs.netcat}/bin/nc localhost 24
         """)
         time.sleep(2)
-        # Bob should now have 2 messages (pre-populated + LMTP)
-        mail.succeed("test $(ls /data/mail/test.local/bob/new/ | wc -l) -ge 2")
+        # Bob should now have exactly 2 messages (pre-populated + LMTP)
+        # Exclude dovecot files with ! -name 'dovecot*'
+        mail.succeed("test $(find /data/mail/bob -type f ! -name 'dovecot*' | wc -l) -eq 2")
 
     # Verify LMTP-delivered messages via IMAP for both users
     with subtest("Alice can read her LMTP-delivered message"):
         result = mail.succeed("""
             (
                 sleep 1
-                echo 'a001 LOGIN alice@test.local testpass'
+                echo 'a001 LOGIN alice testpass'
                 sleep 1
                 echo 'a002 SELECT INBOX'
                 sleep 1
@@ -255,7 +257,7 @@ pkgs.testers.runNixOSTest {
         result = mail.succeed("""
             (
                 sleep 1
-                echo 'a001 LOGIN bob@test.local testpass'
+                echo 'a001 LOGIN bob testpass'
                 sleep 1
                 echo 'a002 SELECT INBOX'
                 sleep 1
@@ -274,7 +276,7 @@ pkgs.testers.runNixOSTest {
         result = mail.succeed("""
             (
                 sleep 1
-                echo 'a001 LOGIN bob@test.local testpass'
+                echo 'a001 LOGIN bob testpass'
                 sleep 1
                 echo 'a002 SELECT INBOX'
                 sleep 1

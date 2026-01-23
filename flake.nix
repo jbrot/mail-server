@@ -135,6 +135,11 @@
           dovecot-standalone = import ./nix/tests/dovecot-test.nix {
             inherit pkgs self;
           };
+
+          # Mail delivery integration test (OpenSMTPd + Dovecot)
+          mail-delivery = import ./nix/tests/mail-delivery-test.nix {
+            inherit pkgs self;
+          };
         } else {})
       );
     };

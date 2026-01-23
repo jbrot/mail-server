@@ -8,9 +8,10 @@ let
 
   # Generate passwd-file for virtual users (user:password:uid:gid:gecos:home:shell)
   # The scheme is specified in passdb args, so we don't prefix the hash here
+  # Users are simple usernames (e.g., "alice"), not full email addresses
   passwdFile = pkgs.writeText "passwd" (
     lib.concatStringsSep "\n" (
-      lib.mapAttrsToList (user: hash: "${user}:${hash}:5000:5000::/data/mail/${lib.head (lib.splitString "@" user)}:") cfg.users
+      lib.mapAttrsToList (user: hash: "${user}:${hash}:5000:5000::/data/mail/${user}:") cfg.users
     ) + "\n"
   );
 
@@ -47,7 +48,7 @@ let
 
     userdb {
       driver = static
-      args = uid=5000 gid=5000 home=/data/mail/%d/%n
+      args = uid=5000 gid=5000 home=/data/mail/%u
     }
 
     # Maildir settings
@@ -105,8 +106,8 @@ let
 
     ${lib.optionalString cfg.enableSieve ''
     plugin {
-      sieve = /data/sieve/%d/%n/.dovecot.sieve
-      sieve_dir = /data/sieve/%d/%n/
+      sieve = /data/sieve/%u/.dovecot.sieve
+      sieve_dir = /data/sieve/%u/
     }
     ''}
   '';
@@ -123,7 +124,7 @@ in
 
     mailLocation = lib.mkOption {
       type = lib.types.str;
-      default = "maildir:/data/mail/%d/%n";
+      default = "maildir:/data/mail/%u";
       description = "Mail storage location (Dovecot mail_location format)";
     };
 
@@ -142,8 +143,8 @@ in
     users = lib.mkOption {
       type = lib.types.attrsOf lib.types.str;
       default = {};
-      example = { "user@example.com" = "$6$..."; };
-      description = "Virtual mail users (user@domain = SHA512-CRYPT password hash)";
+      example = { "alice" = "$6$..."; };
+      description = "Virtual mail users (username = SHA512-CRYPT password hash)";
     };
 
     enableLmtp = lib.mkOption {
