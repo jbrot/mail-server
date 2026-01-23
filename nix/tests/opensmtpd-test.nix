@@ -23,17 +23,15 @@ pkgs.testers.runNixOSTest {
     services.opensmtpdContainer = {
       enable = true;
       image = "docker-archive:${self.packages.${pkgs.system}.opensmtpd-image}";
-      domain = "localhost";
-      localDelivery = true;   # No Dovecot needed
-      enableRspamd = false;   # No Rspamd needed
-      domains = [ "test.local" ];
-      aliases = {
-        postmaster = "root";
-        abuse = "root";
-      };
+      serverDomain = "localhost";      # PKI/HELO domain
+      emailDomain = "test.local";      # Email addresses @test.local
+      localDelivery = true;            # Use maildir delivery (no Dovecot needed)
+      enableRspamd = false;
       # Test credentials (SHA-512 hash of "testpass")
+      # Just usernames - domain is added automatically
       credentials = {
-        "testuser@test.local" = "$6$060RjN4XgGU35LkE$IJC9LNaAeOwWRsW8h0AVqufnGlENfuKQqAWPSb0O3EXk6IvuixkqpkRij69/K6OJPut0LhlbuOvrKKzfStN.Q.";
+        "alice" = "$6$060RjN4XgGU35LkE$IJC9LNaAeOwWRsW8h0AVqufnGlENfuKQqAWPSb0O3EXk6IvuixkqpkRij69/K6OJPut0LhlbuOvrKKzfStN.Q.";
+        "bob" = "$6$060RjN4XgGU35LkE$IJC9LNaAeOwWRsW8h0AVqufnGlENfuKQqAWPSb0O3EXk6IvuixkqpkRij69/K6OJPut0LhlbuOvrKKzfStN.Q.";
       };
     };
 
@@ -63,11 +61,6 @@ pkgs.testers.runNixOSTest {
       podman.enable = true;
     };
 
-    # Create test user for mail delivery
-    users.users.testuser = {
-      isNormalUser = true;
-      uid = 1000;
-    };
   };
 
   testScript = ''
@@ -91,51 +84,63 @@ pkgs.testers.runNixOSTest {
         mail.wait_for_open_port(25, timeout=60)
         mail.wait_for_open_port(587, timeout=60)
 
-    # Test SMTP connection and local mail delivery
-    with subtest("SMTP accepts mail and delivers to mbox"):
-        # Send test email via swaks to root (which exists on the system)
+    # Test SMTP delivery to Alice
+    with subtest("SMTP delivers mail to Alice"):
         mail.succeed(
             "${pkgs.swaks}/bin/swaks "
-            "--to root@test.local "
+            "--to alice@test.local "
             "--from sender@external.com "
             "--server localhost "
             "--port 25 "
             "--timeout 30 "
-            "--header 'Subject: Test Email' "
-            "--body 'This is a test message.'"
+            "--header 'Subject: Email for Alice' "
+            "--body 'This is a test message for Alice.'"
         )
-
-        # Allow time for delivery
         time.sleep(2)
+        # Maildir stores messages in new/ directory
+        mail.succeed("ls /data/mail/alice/new/ | grep -v '^$'")
+        mail.succeed("grep -r 'Subject: Email for Alice' /data/mail/alice/")
 
-        # Verify mail was delivered to mbox (container's /var/mail is mounted from /data/mail)
-        mail.succeed("test -f /data/mail/root")
-        mail.succeed("grep -q 'Subject: Test Email' /data/mail/root")
-
-    # Test authenticated submission (sending mail via port 587)
-    with subtest("Authenticated submission works"):
-        # Send email via authenticated SMTP submission
+    # Test SMTP delivery to Bob
+    with subtest("SMTP delivers mail to Bob"):
         mail.succeed(
             "${pkgs.swaks}/bin/swaks "
-            "--to root@test.local "
-            "--from testuser@test.local "
+            "--to bob@test.local "
+            "--from sender@external.com "
+            "--server localhost "
+            "--port 25 "
+            "--timeout 30 "
+            "--header 'Subject: Email for Bob' "
+            "--body 'This is a test message for Bob.'"
+        )
+        time.sleep(2)
+        mail.succeed("ls /data/mail/bob/new/ | grep -v '^$'")
+        mail.succeed("grep -r 'Subject: Email for Bob' /data/mail/bob/")
+
+    # Test authenticated submission from Alice to Bob
+    with subtest("Authenticated submission from Alice to Bob"):
+        mail.succeed(
+            "${pkgs.swaks}/bin/swaks "
+            "--to bob@test.local "
+            "--from alice@test.local "
             "--server localhost "
             "--port 587 "
             "--tls "
             "--tls-verify "
             "--tls-ca-path /data/certs/fullchain.pem "
-            "--auth-user testuser@test.local "
+            "--auth-user alice "
             "--auth-password testpass "
             "--timeout 30 "
-            "--header 'Subject: Authenticated Test' "
-            "--body 'This was sent via authenticated submission.'"
+            "--header 'Subject: Message from Alice' "
+            "--body 'This was sent via authenticated submission from Alice.'"
         )
-
-        # Allow time for delivery
         time.sleep(2)
+        mail.succeed("grep -r 'Subject: Message from Alice' /data/mail/bob/")
 
-        # Verify the authenticated mail was delivered
-        mail.succeed("grep -q 'Subject: Authenticated Test' /data/mail/root")
+    # Verify mailbox isolation - Alice's maildir should not have Bob's mail
+    with subtest("Mailbox isolation"):
+        mail.fail("grep -r 'Email for Bob' /data/mail/alice/")
+        mail.fail("grep -r 'Email for Alice' /data/mail/bob/")
 
     print("OpenSMTPd standalone test passed!")
   '';
