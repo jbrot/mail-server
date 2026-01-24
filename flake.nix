@@ -140,6 +140,11 @@
           mail-delivery = import ./nix/tests/mail-delivery-test.nix {
             inherit pkgs self;
           };
+
+          # Standalone Rspamd test (spam filtering without OpenSMTPd)
+          rspamd-standalone = import ./nix/tests/rspamd-test.nix {
+            inherit pkgs self;
+          };
         } else {})
       );
     };
