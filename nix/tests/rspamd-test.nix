@@ -51,6 +51,7 @@ pkgs.testers.runNixOSTest {
     services.rspamdContainer = {
       enable = true;
       image = "docker-archive:${self.packages.${pkgs.system}.rspamd-image}";
+      redisImage = "docker-archive:${self.packages.${pkgs.system}.redis-image}";
 
       # Use default ports
       milterPort = 11332;
@@ -122,6 +123,10 @@ pkgs.testers.runNixOSTest {
     rspamd.start()
     rspamd.wait_for_unit("multi-user.target")
 
+    with subtest("Redis starts successfully"):
+        rspamd.wait_for_unit("podman-rspamd-redis.service", timeout=120)
+        rspamd.wait_for_open_port(6379, timeout=60)
+
     with subtest("Rspamd starts successfully"):
         rspamd.wait_for_unit("podman-rspamd.service", timeout=120)
         # Give rspamd a moment to fully initialize
@@ -168,6 +173,12 @@ pkgs.testers.runNixOSTest {
         result = rspamd.succeed("cat /etc/rspamd/local.d/classifier-bayes.conf")
         assert "spam_threshold = 8" in result, f"Custom spam threshold not found: {result}"
         assert "ham_threshold = -1" in result, f"Custom ham threshold not found: {result}"
+        assert 'backend = "redis"' in result, f"Redis backend not configured: {result}"
+
+    with subtest("Redis configuration applied"):
+        result = rspamd.succeed("cat /etc/rspamd/local.d/redis.conf")
+        assert "servers" in result, f"Redis servers not configured: {result}"
+        assert "127.0.0.1:6379" in result, f"Redis server address not found: {result}"
 
     with subtest("Custom configuration applied - logging.inc"):
         result = rspamd.succeed("cat /etc/rspamd/local.d/logging.inc")

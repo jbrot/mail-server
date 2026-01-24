@@ -37,6 +37,7 @@ pkgs.testers.runNixOSTest {
     services.rspamdContainer = {
       enable = true;
       image = "docker-archive:${self.packages.${pkgs.system}.rspamd-image}";
+      redisImage = "docker-archive:${self.packages.${pkgs.system}.redis-image}";
 
       # Action thresholds for testing
       actions = {
@@ -106,8 +107,12 @@ pkgs.testers.runNixOSTest {
       '';
     };
 
-    # Service ordering
-    systemd.services.podman-rspamd.after = [ "setup-dkim-key.service" ];
+    # Service ordering - add setup-dkim-key to rspamd's dependencies
+    systemd.services.podman-rspamd.after = lib.mkForce [
+      "network-online.target"
+      "podman-rspamd-redis.service"
+      "setup-dkim-key.service"
+    ];
     systemd.services.podman-opensmtpd.after = [
       "generate-test-certs.service"
       "podman-rspamd.service"
@@ -160,6 +165,11 @@ pkgs.testers.runNixOSTest {
         mail.succeed("mkdir -p /data/mail/bob/{cur,new,tmp}")
         mail.succeed("mkdir -p /data/mail/bob/.Junk/{cur,new,tmp}")
         mail.succeed("chown -R 5000:5000 /data/mail")
+
+    # Wait for Redis
+    with subtest("Redis starts successfully"):
+        mail.wait_for_unit("podman-rspamd-redis.service", timeout=120)
+        mail.wait_for_open_port(6379, timeout=60)
 
     # Wait for Rspamd
     with subtest("Rspamd starts successfully"):

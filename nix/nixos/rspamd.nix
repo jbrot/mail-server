@@ -75,19 +75,9 @@ let
     # Bayes classifier configuration
     ${lib.optionalString (!cfg.bayes.enable) "enabled = false;"}
 
-    # Use SQLite backend for Bayes data
-    backend = "sqlite";
-
-    # Store Bayes database in persistent location
-    statfile {
-      symbol = "BAYES_HAM";
-      path = "/data/rspamd/bayes.ham.sqlite";
-    }
-
-    statfile {
-      symbol = "BAYES_SPAM";
-      path = "/data/rspamd/bayes.spam.sqlite";
-    }
+    # Use Redis backend for Bayes data
+    backend = "redis";
+    servers = "127.0.0.1:${toString cfg.redisPort}";
 
     # Auto-learn from high-confidence results
     autolearn {
@@ -97,6 +87,12 @@ let
 
     # Minimum learns before using Bayes
     min_learns = 200;
+  '';
+
+  # Generate redis.conf for rspamd global Redis settings
+  redisConf = pkgs.writeText "redis.conf" ''
+    # Redis configuration for rspamd
+    servers = "127.0.0.1:${toString cfg.redisPort}";
   '';
 
   # Generate options.inc
@@ -133,6 +129,17 @@ in
     image = lib.mkOption {
       type = lib.types.str;
       description = "Container image URI";
+    };
+
+    redisImage = lib.mkOption {
+      type = lib.types.str;
+      description = "Redis container image URI";
+    };
+
+    redisPort = lib.mkOption {
+      type = lib.types.int;
+      default = 6379;
+      description = "Port for Redis server";
     };
 
     # Ports
@@ -270,6 +277,27 @@ in
   };
 
   config = lib.mkIf cfg.enable {
+    # Redis container for rspamd backend
+    virtualisation.oci-containers.containers.rspamd-redis = {
+      image = cfg.redisImage;
+      autoStart = true;
+
+      # Use host network for simplicity
+      extraOptions = [
+        "--network=host"
+      ];
+
+      # Volume mounts
+      volumes = [
+        "/data/redis:/data/redis"
+      ];
+
+      # Environment
+      environment = {
+        TZ = "UTC";
+      };
+    };
+
     # Rspamd container
     virtualisation.oci-containers.containers.rspamd = {
       image = cfg.image;
@@ -293,9 +321,19 @@ in
       };
     };
 
-    # Container service configuration
-    systemd.services.podman-rspamd = {
+    # Redis container service configuration
+    systemd.services.podman-rspamd-redis = {
       after = [ "network-online.target" ];
+      serviceConfig = {
+        Restart = "always";
+        RestartSec = "10s";
+      };
+    };
+
+    # Rspamd container service configuration
+    systemd.services.podman-rspamd = {
+      after = [ "network-online.target" "podman-rspamd-redis.service" ];
+      requires = [ "podman-rspamd-redis.service" ];
       serviceConfig = {
         Restart = "always";
         RestartSec = "10s";
@@ -308,6 +346,7 @@ in
       "d /etc/rspamd/local.d 0755 root root -"
       "d /data/rspamd 0755 1000 1000 -"
       "d /data/rspamd/dkim 0700 1000 1000 -"
+      "d /data/redis 0755 1000 1000 -"
     ];
 
     # Deploy configuration files
@@ -349,6 +388,11 @@ in
 
       "rspamd/local.d/logging.inc" = {
         source = loggingInc;
+        mode = "0644";
+      };
+
+      "rspamd/local.d/redis.conf" = {
+        source = redisConf;
         mode = "0644";
       };
     } // lib.mapAttrs' (name: content: {

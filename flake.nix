@@ -31,12 +31,14 @@
           opensmtpd-image = pkgs.callPackage ./nix/containers/opensmtpd.nix { };
           dovecot-image = pkgs.callPackage ./nix/containers/dovecot.nix { };
           rspamd-image = pkgs.callPackage ./nix/containers/rspamd.nix { };
+          redis-image = pkgs.callPackage ./nix/containers/redis.nix { };
 
           # Convenience target to build all images
           all-images = pkgs.linkFarm "all-images" [
             { name = "opensmtpd-image"; path = self.packages.${system}.opensmtpd-image; }
             { name = "dovecot-image"; path = self.packages.${system}.dovecot-image; }
             { name = "rspamd-image"; path = self.packages.${system}.rspamd-image; }
+            { name = "redis-image"; path = self.packages.${system}.redis-image; }
           ];
         }
       );
@@ -111,6 +113,7 @@
           opensmtpd-image = self.packages.${system}.opensmtpd-image;
           dovecot-image = self.packages.${system}.dovecot-image;
           rspamd-image = self.packages.${system}.rspamd-image;
+          redis-image = self.packages.${system}.redis-image;
 
           # Config validation tests (fast, no containers needed)
           inherit (smokeTests)
