@@ -142,6 +142,12 @@ in
       description = "Port for Redis server";
     };
 
+    redisMaxMemory = lib.mkOption {
+      type = lib.types.str;
+      default = "256mb";
+      description = "Maximum memory for Redis (e.g., '256mb', '1gb')";
+    };
+
     # Ports
     milterPort = lib.mkOption {
       type = lib.types.int;
@@ -291,6 +297,9 @@ in
       volumes = [
         "/data/redis:/data/redis"
       ];
+
+      # Pass maxmemory as command-line argument
+      cmd = [ "--maxmemory" cfg.redisMaxMemory ];
 
       # Environment
       environment = {
