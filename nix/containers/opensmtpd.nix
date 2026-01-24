@@ -68,6 +68,7 @@ pkgs.dockerTools.buildLayeredImage {
   contents = [
     opensmtpd
     opensmtpd-extras
+    pkgs.opensmtpd-filter-rspamd
     entrypoint
     pkgs.coreutils
     pkgs.bash

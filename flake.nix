@@ -145,6 +145,11 @@
           rspamd-standalone = import ./nix/tests/rspamd-test.nix {
             inherit pkgs self;
           };
+
+          # OpenSMTPd + Rspamd integration test (spam filtering and DKIM signing)
+          opensmtpd-rspamd = import ./nix/tests/opensmtpd-rspamd-test.nix {
+            inherit pkgs self;
+          };
         } else {})
       );
     };

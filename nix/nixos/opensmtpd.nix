@@ -33,7 +33,7 @@ let
         disconnect "550 no FCrDNS is so 80s"
 
     ${lib.optionalString cfg.enableRspamd ''
-    filter rspamd proc-exec "filter-rspamd"
+    filter rspamd proc-exec "${pkgs.opensmtpd-filter-rspamd}/bin/filter-rspamd"
     ''}
 
     # Listen on all interfaces
