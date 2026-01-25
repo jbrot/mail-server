@@ -153,6 +153,11 @@
           opensmtpd-rspamd = import ./nix/tests/opensmtpd-rspamd-test.nix {
             inherit pkgs self;
           };
+
+          # Dovecot + Rspamd integration test (spam/ham learning via IMAP)
+          dovecot-rspamd = import ./nix/tests/dovecot-rspamd-test.nix {
+            inherit pkgs self;
+          };
         } else {})
       );
     };

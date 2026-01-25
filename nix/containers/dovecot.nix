@@ -6,6 +6,12 @@ let
   # Dovecot package with required features
   dovecot = pkgs.dovecot;
 
+  # Pigeonhole package for sieve support (includes imap_sieve plugin)
+  pigeonhole = pkgs.dovecot_pigeonhole;
+
+  # Rspamd package for rspamc CLI (used for spam/ham learning)
+  rspamd = pkgs.rspamd;
+
   # Create a minimal passwd file
   passwdFile = pkgs.writeText "passwd" ''
     root:x:0:0:root:/root:/bin/sh
@@ -56,6 +62,8 @@ pkgs.dockerTools.buildLayeredImage {
 
   contents = [
     dovecot
+    pigeonhole  # Sieve support including imap_sieve plugin
+    rspamd  # For rspamc CLI (spam/ham learning via sieve)
     entrypoint
     pkgs.coreutils
     pkgs.bash
@@ -71,8 +79,14 @@ pkgs.dockerTools.buildLayeredImage {
     mkdir -p data/certs
     mkdir -p tmp
 
-    # Symlink dovecot modules to the nix store location
-    ln -s ${dovecot}/lib/dovecot etc/dovecot/modules
+    # Create modules directory with both dovecot and pigeonhole modules
+    mkdir -p etc/dovecot/modules
+    for mod in ${dovecot}/lib/dovecot/*.so; do
+      ln -s "$mod" etc/dovecot/modules/
+    done
+    for mod in ${pigeonhole}/lib/dovecot/*.so; do
+      ln -s "$mod" etc/dovecot/modules/
+    done
 
     # Copy passwd and group files
     cp ${passwdFile} etc/passwd
@@ -82,6 +96,10 @@ pkgs.dockerTools.buildLayeredImage {
     echo "passwd: files" > etc/nsswitch.conf
     echo "group: files" >> etc/nsswitch.conf
     echo "hosts: files dns" >> etc/nsswitch.conf
+
+    # Create symlinks for rspamc in standard PATH locations
+    mkdir -p usr/bin
+    ln -s ${rspamd}/bin/rspamc usr/bin/rspamc
   '';
 
   config = {

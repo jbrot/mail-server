@@ -78,6 +78,7 @@ let
     # Use Redis backend for Bayes data
     backend = "redis";
     servers = "127.0.0.1:${toString cfg.redisPort}";
+    new_schema = true;
 
     # Auto-learn from high-confidence results
     autolearn {
