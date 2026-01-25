@@ -49,7 +49,6 @@ pkgs.testers.runNixOSTest {
 
       enableLmtp = true;
       lmtpPort = 24;
-      enableSieve = false;
     };
 
     # Service ordering: certs -> dovecot -> opensmtpd

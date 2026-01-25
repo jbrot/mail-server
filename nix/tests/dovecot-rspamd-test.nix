@@ -41,11 +41,10 @@ pkgs.testers.runNixOSTest {
         "alice" = "$6$060RjN4XgGU35LkE$IJC9LNaAeOwWRsW8h0AVqufnGlENfuKQqAWPSb0O3EXk6IvuixkqpkRij69/K6OJPut0LhlbuOvrKKzfStN.Q.";
       };
 
-      # Disable LMTP and ManageSieve protocol (not needed for this test)
+      # Disable LMTP (not needed for this test)
       enableLmtp = false;
-      enableSieve = false;  # ManageSieve protocol - not needed, we use imap_sieve plugin
 
-      # Enable rspamd integration (uses imap_sieve plugin, not ManageSieve protocol)
+      # Enable rspamd integration (uses imap_sieve plugin)
       rspamd = {
         enable = true;
         # Use default host (controller port 11334)

@@ -31,7 +31,6 @@ pkgs.testers.runNixOSTest {
       };
 
       enableLmtp = true;
-      enableSieve = false;  # Keep simple for this test
     };
 
     # Ensure certs are generated before Dovecot starts
