@@ -29,3 +29,9 @@ Thumbs.db
 *.pem
 *.key
 secrets/
+
+# Production config (keep out of version control)
+config/production/
+
+# Generated terraform vars from Nix config
+terraform/from-nix.auto.tfvars

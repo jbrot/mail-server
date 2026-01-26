@@ -18,6 +18,19 @@
         "type": "github"
       }
     },
+    "mail-server-config": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1,
+        "narHash": "sha256-9DdNUngjNEtXXU8QJ728BVO/+6on9vJe/acKSksQhls=",
+        "path": "./config/default-x86_64",
+        "type": "path"
+      },
+      "original": {
+        "path": "./config/default-x86_64",
+        "type": "path"
+      }
+    },
     "nixpkgs": {
       "locked": {
         "lastModified": 1735563628,
@@ -37,6 +50,7 @@
     "root": {
       "inputs": {
         "flake-utils": "flake-utils",
+        "mail-server-config": "mail-server-config",
         "nixpkgs": "nixpkgs"
       }
     },

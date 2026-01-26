@@ -13,6 +13,14 @@ pkgs.testers.runNixOSTest {
       ../nixos/mail-server.nix
     ];
 
+    # Explicit image paths for tests
+    services.mailServer.images = {
+      opensmtpd = "docker-archive:${self.packages.${pkgs.system}.opensmtpd-image}";
+      dovecot = "docker-archive:${self.packages.${pkgs.system}.dovecot-image}";
+      rspamd = "docker-archive:${self.packages.${pkgs.system}.rspamd-image}";
+      redis = "docker-archive:${self.packages.${pkgs.system}.redis-image}";
+    };
+
     # === Test Certificate Generation ===
     services.testCerts = {
       enable = true;
@@ -34,15 +42,6 @@ pkgs.testers.runNixOSTest {
       aliases = {
         "postmaster" = "testuser";
         "abuse" = "testuser";
-      };
-
-      # Use local container images
-      useEcr = false;
-      images = {
-        opensmtpd = "docker-archive:${self.packages.${pkgs.system}.opensmtpd-image}";
-        dovecot = "docker-archive:${self.packages.${pkgs.system}.dovecot-image}";
-        rspamd = "docker-archive:${self.packages.${pkgs.system}.rspamd-image}";
-        redis = "docker-archive:${self.packages.${pkgs.system}.redis-image}";
       };
 
       # Disable DKIM for testing (no keys generated)

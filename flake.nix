@@ -4,9 +4,17 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-24.05";
     flake-utils.url = "github:numtide/flake-utils";
+
+    # Config input - override for different configs:
+    # nix build .#mail-server-ami --override-input mail-server-config path:./config/production
+    # Default is x86_64; use deploy.sh which auto-selects based on host architecture
+    mail-server-config = {
+      url = "path:./config/default-x86_64";
+      flake = false;
+    };
   };
 
-  outputs = { self, nixpkgs, flake-utils }:
+  outputs = { self, nixpkgs, flake-utils, mail-server-config }:
     let
       # Systems we support
       supportedSystems = [ "x86_64-linux" "aarch64-linux" ];
@@ -19,6 +27,9 @@
         inherit system;
         config.allowUnfree = true;
       });
+
+      # Import mail server configuration from the config input
+      mailServerConfig = import "${mail-server-config}/mail-server.nix";
 
     in
     {
@@ -40,12 +51,17 @@
             { name = "rspamd-image"; path = self.packages.${system}.rspamd-image; }
             { name = "redis-image"; path = self.packages.${system}.redis-image; }
           ];
-        }
+        } // (if system == mailServerConfig.architecture then {
+          # Custom NixOS AMI for EC2 deployment
+          # Architecture determined by config (x86_64-linux or aarch64-linux)
+          mail-server-ami = self.nixosConfigurations.mail-server.config.system.build.amazonImage;
+        } else {})
       );
 
       # NixOS configuration for the mail server
+      # Architecture determined by mailServerConfig.architecture
       nixosConfigurations.mail-server = nixpkgs.lib.nixosSystem {
-        system = "x86_64-linux";
+        system = mailServerConfig.architecture;
         modules = [
           ./nix/nixos/configuration.nix
           ./nix/nixos/hardware-ec2.nix
@@ -53,7 +69,7 @@
           ./nix/nixos/mail-server.nix
         ];
         specialArgs = {
-          inherit self;
+          inherit self mailServerConfig;
         };
       };
 
@@ -91,12 +107,16 @@
               echo "  nix build .#dovecot-image    - Build Dovecot container"
               echo "  nix build .#rspamd-image     - Build Rspamd container"
               echo "  nix build .#all-images       - Build all containers"
+              echo "  nix build .#mail-server-ami  - Build EC2 AMI"
               echo ""
-              echo "  terraform -chdir=terraform plan   - Plan infrastructure"
-              echo "  terraform -chdir=terraform apply  - Apply infrastructure"
+              echo "  nix flake check              - Run all tests"
               echo ""
-              echo "  ./scripts/build-and-push.sh  - Build and push images to ECR"
-              echo "  ./scripts/deploy-nixos.sh    - Deploy NixOS config to server"
+              echo "  ./scripts/deploy.sh          - Build and deploy AMI"
+              echo "  ./scripts/deploy.sh --help   - Show deploy options"
+              echo ""
+
+              # Enable tab completion for deploy.sh
+              source ./scripts/deploy-completion.bash 2>/dev/null || true
             '';
           };
         }
@@ -120,11 +140,14 @@
             rspamd-config-check
             opensmtpd-config-check
             dovecot-config-check;
-
+        }
+        # NixOS config and VM tests only on the configured architecture
+        # (VM tests require KVM; nix flake check runs only checks matching host system)
+        // (if system == mailServerConfig.architecture then {
           # Verify NixOS configuration evaluates
           nixos-config = self.nixosConfigurations.mail-server.config.system.build.toplevel;
-        } // (if system == "x86_64-linux" then {
-          # VM integration test (only on x86_64-linux due to QEMU)
+
+          # VM integration test
           mail-server-integration = import ./nix/tests/mail-server-test.nix {
             inherit pkgs self;
           };

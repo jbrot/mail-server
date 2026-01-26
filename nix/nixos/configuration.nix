@@ -1,7 +1,7 @@
 # Main NixOS configuration for mail server
 # nix/nixos/configuration.nix
 
-{ config, lib, pkgs, self, ... }:
+{ config, lib, pkgs, self, mailServerConfig, ... }:
 
 {
   # System basics
@@ -58,16 +58,33 @@
     defaultNetwork.settings.dns_enabled = true;
   };
 
-  # ECR credential helper - additional registry configuration
+  # Container registry configuration - block all remote registries
+  # All images must be loaded from local Nix store archives (docker-archive:)
   # Note: Uses mkForce to override the default registries.conf from containers module
   environment.etc."containers/registries.conf".text = lib.mkForce ''
-    [registries.search]
-    registries = ['docker.io']
+    # No default search registries - unqualified image names will fail
+    unqualified-search-registries = []
+
+    # Block common public registries
+    [[registry]]
+    location = "docker.io"
+    blocked = true
 
     [[registry]]
-    prefix = "*.dkr.ecr.*.amazonaws.com"
-    insecure = false
-    blocked = false
+    location = "quay.io"
+    blocked = true
+
+    [[registry]]
+    location = "ghcr.io"
+    blocked = true
+
+    [[registry]]
+    location = "gcr.io"
+    blocked = true
+
+    [[registry]]
+    location = "registry.k8s.io"
+    blocked = true
   '';
 
   # SSH configuration
@@ -99,11 +116,11 @@
   security.acme = {
     acceptTerms = true;
     defaults = {
-      email = "postmaster@example.com";  # Replace with your email
+      email = mailServerConfig.acmeEmail;
     };
 
     # Certificate for mail server
-    certs."mail.example.com" = {
+    certs.${mailServerConfig.hostname} = {
       # Use HTTP-01 challenge
       webroot = "/var/lib/acme/acme-challenge";
 
@@ -126,7 +143,7 @@
   # Nginx for ACME HTTP-01 challenges
   services.nginx = {
     enable = true;
-    virtualHosts."mail.example.com" = {
+    virtualHosts.${mailServerConfig.hostname} = {
       locations."/.well-known/acme-challenge" = {
         root = "/var/lib/acme/acme-challenge";
       };

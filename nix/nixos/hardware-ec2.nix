@@ -5,12 +5,16 @@
 
 {
   imports = [
-    "${modulesPath}/virtualisation/amazon-image.nix"
+    # This module provides config.system.build.amazonImage
+    "${modulesPath}/../maintainers/scripts/ec2/amazon-image.nix"
   ];
 
   # EC2 instance settings
   ec2.hvm = true;
   ec2.efi = true;
+
+  # AMI image size - needs to be large enough for NixOS + all container images
+  amazonImage.sizeMB = 8192;  # 8 GB
 
   # Boot configuration
   boot.loader.grub.device = "nodev";
@@ -39,8 +43,7 @@
   # Swap (optional, but recommended)
   swapDevices = [];
 
-  # Hardware settings
-  nixpkgs.hostPlatform = lib.mkDefault "x86_64-linux";
+  # Hardware settings - architecture set by flake based on config
 
   # Time zone
   time.timeZone = "UTC";

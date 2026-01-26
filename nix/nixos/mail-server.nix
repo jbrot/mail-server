@@ -1,14 +1,10 @@
 # Full mail server module - integrates OpenSMTPd, Dovecot, and Rspamd
 # nix/nixos/mail-server.nix
 
-{ config, lib, pkgs, ... }:
+{ config, lib, pkgs, self, ... }:
 
 let
   cfg = config.services.mailServer;
-
-  # Default ECR registry configuration
-  defaultEcrRegistry = "123456789012.dkr.ecr.us-east-1.amazonaws.com";
-  defaultProjectName = "email-server";
 
 in
 {
@@ -50,34 +46,28 @@ in
       description = "Email aliases (name -> target username)";
     };
 
-    # Image configuration
+    # Image configuration - defaults to local Nix-built images (baked into AMI)
     images = {
       opensmtpd = lib.mkOption {
         type = lib.types.str;
-        default = "${defaultEcrRegistry}/${defaultProjectName}/opensmtpd:latest";
+        default = "docker-archive:${self.packages.${pkgs.system}.opensmtpd-image}";
         description = "OpenSMTPd container image";
       };
       dovecot = lib.mkOption {
         type = lib.types.str;
-        default = "${defaultEcrRegistry}/${defaultProjectName}/dovecot:latest";
+        default = "docker-archive:${self.packages.${pkgs.system}.dovecot-image}";
         description = "Dovecot container image";
       };
       rspamd = lib.mkOption {
         type = lib.types.str;
-        default = "${defaultEcrRegistry}/${defaultProjectName}/rspamd:latest";
+        default = "docker-archive:${self.packages.${pkgs.system}.rspamd-image}";
         description = "Rspamd container image";
       };
       redis = lib.mkOption {
         type = lib.types.str;
-        default = "${defaultEcrRegistry}/${defaultProjectName}/redis:latest";
+        default = "docker-archive:${self.packages.${pkgs.system}.redis-image}";
         description = "Redis container image";
       };
-    };
-
-    useEcr = lib.mkOption {
-      type = lib.types.bool;
-      default = true;
-      description = "Whether to use ECR for images (enables ECR login service)";
     };
 
     # DKIM configuration
@@ -185,42 +175,10 @@ in
     # === Service Ordering ===
     # Redis starts first, then rspamd, then dovecot, then opensmtpd
     # All containers depend on mail-network-setup
-    # When ECR is enabled, all containers depend on ecr-login
-    systemd.services.podman-rspamd-redis = {
-      after = [ "mail-network-setup.service" ]
-        ++ lib.optionals cfg.useEcr [ "ecr-login.service" ];
-      requires = lib.optionals cfg.useEcr [ "ecr-login.service" ];
-    };
+    systemd.services.podman-rspamd-redis.after = [ "mail-network-setup.service" ];
     systemd.services.podman-rspamd.after = [ "podman-rspamd-redis.service" "mail-network-setup.service" ];
     systemd.services.podman-dovecot.after = [ "podman-rspamd.service" "mail-network-setup.service" ];
     systemd.services.podman-opensmtpd.after = [ "podman-dovecot.service" "podman-rspamd.service" "mail-network-setup.service" ];
-
-    # === ECR Login (for production) ===
-    systemd.services.ecr-login = lib.mkIf cfg.useEcr {
-      description = "Login to AWS ECR";
-      wantedBy = [ "multi-user.target" ];
-      wants = [ "network-online.target" ];
-      after = [ "network-online.target" ];
-      before = [ "podman-rspamd-redis.service" "podman-rspamd.service" "podman-dovecot.service" "podman-opensmtpd.service" ];
-      serviceConfig = {
-        Type = "oneshot";
-        RemainAfterExit = true;
-      };
-      script = ''
-        ${pkgs.awscli2}/bin/aws ecr get-login-password --region us-east-1 | \
-          ${pkgs.podman}/bin/podman login --username AWS --password-stdin ${defaultEcrRegistry}
-      '';
-    };
-
-    # Timer to refresh ECR credentials (they expire after 12 hours)
-    systemd.timers.ecr-login = lib.mkIf cfg.useEcr {
-      wantedBy = [ "timers.target" ];
-      timerConfig = {
-        OnBootSec = "0";
-        OnUnitActiveSec = "6h";
-        RandomizedDelaySec = "5m";
-      };
-    };
 
     # === Data Directories ===
     # UIDs: vmail=5000, rspamd=3000, redis=4000 (unique per service for isolation)
