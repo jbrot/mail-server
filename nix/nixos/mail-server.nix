@@ -196,13 +196,14 @@ in
     };
 
     # === Data Directories ===
+    # UIDs: vmail=5000, rspamd=3000, redis=4000 (unique per service for isolation)
     systemd.tmpfiles.rules = [
       "d /data 0755 root root -"
       "d /data/mail 0700 5000 5000 -"
       "d /data/certs 0755 root root -"
-      "d /data/rspamd 0755 1000 1000 -"
-      "d /data/rspamd/dkim 0700 1000 1000 -"
-      "d /data/redis 0755 1000 1000 -"
+      "d /data/rspamd 0755 3000 3000 -"
+      "d /data/rspamd/dkim 0700 3000 3000 -"
+      "d /data/redis 0755 4000 4000 -"
       "d /data/sieve 0700 5000 5000 -"
     ];
 
@@ -227,8 +228,8 @@ in
         ${pkgs.rspamd}/bin/rspamadm dkim_keygen -s "$SELECTOR" -d "$DOMAIN" \
           -k "$KEY_DIR/$DOMAIN.$SELECTOR.key" > "$KEY_DIR/$DOMAIN.$SELECTOR.txt"
 
-        # Fix permissions for rspamd container
-        chown 1000:1000 "$KEY_DIR/$DOMAIN.$SELECTOR.key"
+        # Fix permissions for rspamd container (UID 3000)
+        chown 3000:3000 "$KEY_DIR/$DOMAIN.$SELECTOR.key"
         chmod 600 "$KEY_DIR/$DOMAIN.$SELECTOR.key"
 
         echo ""

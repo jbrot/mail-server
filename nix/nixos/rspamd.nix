@@ -136,10 +136,64 @@ in
       description = "Port for Redis server";
     };
 
-    redisMaxMemory = lib.mkOption {
-      type = lib.types.str;
-      default = "256mb";
-      description = "Maximum memory for Redis (e.g., '256mb', '1gb')";
+    # Resource limits for rspamd container
+    resources = {
+      memory = lib.mkOption {
+        type = lib.types.int;
+        default = 512;
+        description = "Rspamd container memory limit in MB";
+      };
+
+      memoryReservation = lib.mkOption {
+        type = lib.types.int;
+        default = 256;
+        description = "Rspamd container memory reservation (soft limit) in MB";
+      };
+
+      cpus = lib.mkOption {
+        type = lib.types.float;
+        default = 1.0;
+        description = "CPU limit";
+      };
+
+      pidsLimit = lib.mkOption {
+        type = lib.types.int;
+        default = 200;
+        description = "Maximum number of PIDs in the container";
+      };
+    };
+
+    # Resource limits for redis container
+    redisResources = {
+      memory = lib.mkOption {
+        type = lib.types.int;
+        default = 256;
+        description = "Redis container memory limit in MB";
+      };
+
+      memoryReservation = lib.mkOption {
+        type = lib.types.int;
+        default = 128;
+        description = "Redis container memory reservation (soft limit) in MB";
+      };
+
+      memoryBuffer = lib.mkOption {
+        type = lib.types.int;
+        default = 32;
+        description = "Memory reserved for Redis process overhead in MB (subtracted from container limit for maxmemory)";
+      };
+
+      cpus = lib.mkOption {
+        type = lib.types.float;
+        default = 0.5;
+        description = "CPU limit";
+      };
+
+      pidsLimit = lib.mkOption {
+        type = lib.types.int;
+        default = 50;
+        description = "Maximum number of PIDs in the container";
+      };
     };
 
     # Ports
@@ -279,6 +333,13 @@ in
       # Use host network for simplicity
       extraOptions = [
         "--network=host"
+        # Run as redis user (UID 4000)
+        "--user=4000:4000"
+        # Resource limits
+        "--memory=${toString cfg.redisResources.memory}m"
+        "--memory-reservation=${toString cfg.redisResources.memoryReservation}m"
+        "--cpus=${toString cfg.redisResources.cpus}"
+        "--pids-limit=${toString cfg.redisResources.pidsLimit}"
       ];
 
       # Volume mounts
@@ -286,8 +347,8 @@ in
         "/data/redis:/data/redis"
       ];
 
-      # Pass maxmemory as command-line argument
-      cmd = [ "--maxmemory" cfg.redisMaxMemory ];
+      # Calculate Redis maxmemory from container limit minus buffer for overhead
+      cmd = [ "--maxmemory" "${toString (cfg.redisResources.memory - cfg.redisResources.memoryBuffer)}mb" ];
 
       # Environment
       environment = {
@@ -301,9 +362,15 @@ in
       autoStart = true;
 
       # Use host network for simplicity
+      # Note: rspamd starts as root and drops privileges to rspamd user internally
       extraOptions = [
         "--network=host"
         "--cap-add=NET_BIND_SERVICE"
+        # Resource limits
+        "--memory=${toString cfg.resources.memory}m"
+        "--memory-reservation=${toString cfg.resources.memoryReservation}m"
+        "--cpus=${toString cfg.resources.cpus}"
+        "--pids-limit=${toString cfg.resources.pidsLimit}"
       ];
 
       # Volume mounts
@@ -324,6 +391,17 @@ in
       serviceConfig = {
         Restart = "always";
         RestartSec = "10s";
+
+        # Systemd hardening
+        # Note: ProtectSystem omitted - podman needs write access to /var/lib/containers and /etc/containers
+        ProtectHome = true;
+        PrivateTmp = true;
+        NoNewPrivileges = true;
+        ProtectKernelTunables = true;
+        ProtectKernelModules = true;
+        # ProtectControlGroups omitted - podman needs to create cgroups for containers
+        RestrictSUIDSGID = true;
+        # Resource limits handled by container runtime, not systemd
       };
     };
 
@@ -334,16 +412,28 @@ in
       serviceConfig = {
         Restart = "always";
         RestartSec = "10s";
+
+        # Systemd hardening
+        # Note: ProtectSystem omitted - podman needs write access to /var/lib/containers and /etc/containers
+        ProtectHome = true;
+        PrivateTmp = true;
+        NoNewPrivileges = true;
+        ProtectKernelTunables = true;
+        ProtectKernelModules = true;
+        # ProtectControlGroups omitted - podman needs to create cgroups for containers
+        RestrictSUIDSGID = true;
+        # Resource limits handled by container runtime, not systemd
       };
     };
 
     # Create configuration directories
+    # UIDs: rspamd=3000, redis=4000 (unique per service for isolation)
     systemd.tmpfiles.rules = [
       "d /etc/rspamd 0755 root root -"
       "d /etc/rspamd/local.d 0755 root root -"
-      "d /data/rspamd 0755 1000 1000 -"
-      "d /data/rspamd/dkim 0700 1000 1000 -"
-      "d /data/redis 0755 1000 1000 -"
+      "d /data/rspamd 0755 3000 3000 -"
+      "d /data/rspamd/dkim 0700 3000 3000 -"
+      "d /data/redis 0755 4000 4000 -"
     ];
 
     # Deploy configuration files

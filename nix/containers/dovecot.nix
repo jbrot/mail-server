@@ -28,18 +28,10 @@ let
   '';
 
   # Entrypoint script
+  # Directories created in extraCommands/fakeRootCommands with correct ownership
+  # Host pre-creates /data/mail with correct ownership via tmpfiles.rules
   entrypoint = pkgs.writeShellScriptBin "entrypoint" ''
     set -e
-
-    # Create required directories
-    mkdir -p /var/run/dovecot
-    mkdir -p /var/lib/dovecot
-    mkdir -p /data/mail
-    mkdir -p /data/certs
-
-    # Set permissions for mail directory
-    chown -R vmail:vmail /data/mail
-    chmod 700 /data/mail
 
     # Check for config file
     if [ ! -f /etc/dovecot/dovecot.conf ]; then
@@ -101,6 +93,18 @@ pkgs.dockerTools.buildLayeredImage {
     mkdir -p usr/bin
     ln -s ${rspamd}/bin/rspamc usr/bin/rspamc
   '';
+
+  # Use fakeRootCommands to set ownership (baked into image)
+  # Dovecot master runs as root, workers run as vmail (5000)
+  fakeRootCommands = ''
+    # Runtime directories owned by root (dovecot master process)
+    chown root:root var/run/dovecot
+    chown root:root var/lib/dovecot
+    # Mail directory owned by vmail (will be mounted from host anyway)
+    chown 5000:5000 data/mail
+    chmod 700 data/mail
+  '';
+  enableFakechroot = true;
 
   config = {
     Entrypoint = [ "${entrypoint}/bin/entrypoint" ];

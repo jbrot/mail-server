@@ -126,6 +126,33 @@ in
       default = 5000;
       description = "GID for virtual mail group";
     };
+
+    # Resource limits
+    resources = {
+      memory = lib.mkOption {
+        type = lib.types.int;
+        default = 256;
+        description = "Container memory limit in MB";
+      };
+
+      memoryReservation = lib.mkOption {
+        type = lib.types.int;
+        default = 128;
+        description = "Container memory reservation (soft limit) in MB";
+      };
+
+      cpus = lib.mkOption {
+        type = lib.types.float;
+        default = 0.5;
+        description = "CPU limit";
+      };
+
+      pidsLimit = lib.mkOption {
+        type = lib.types.int;
+        default = 100;
+        description = "Maximum number of PIDs in the container";
+      };
+    };
   };
 
   config = lib.mkIf cfg.enable {
@@ -138,6 +165,11 @@ in
       extraOptions = [
         "--network=host"
         "--cap-add=NET_BIND_SERVICE"
+        # Resource limits
+        "--memory=${toString cfg.resources.memory}m"
+        "--memory-reservation=${toString cfg.resources.memoryReservation}m"
+        "--cpus=${toString cfg.resources.cpus}"
+        "--pids-limit=${toString cfg.resources.pidsLimit}"
       ] ++ lib.optionals cfg.localDelivery [
         # SETUID/SETGID only needed for local maildir delivery, not LMTP
         "--cap-add=SETUID"
@@ -168,6 +200,17 @@ in
       serviceConfig = {
         Restart = "always";
         RestartSec = "10s";
+
+        # Systemd hardening
+        # Note: ProtectSystem omitted - podman needs write access to /var/lib/containers and /etc/containers
+        ProtectHome = true;
+        PrivateTmp = true;
+        NoNewPrivileges = true;
+        ProtectKernelTunables = true;
+        ProtectKernelModules = true;
+        # ProtectControlGroups omitted - podman needs to create cgroups for containers
+        RestrictSUIDSGID = true;
+        # Resource limits handled by container runtime, not systemd
       };
     };
 

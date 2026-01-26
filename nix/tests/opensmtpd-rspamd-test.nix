@@ -102,7 +102,8 @@ pkgs.testers.runNixOSTest {
       script = ''
         mkdir -p /data/rspamd/dkim
         cp ${dkimPrivateKey}/test.local.mail.key /data/rspamd/dkim/
-        chown -R 1000:1000 /data/rspamd
+        # rspamd runs as UID 3000
+        chown -R 3000:3000 /data/rspamd
         chmod 600 /data/rspamd/dkim/*.key
       '';
     };

@@ -7,37 +7,24 @@ let
   rspamd = pkgs.rspamd;
 
   # Create a minimal passwd file
+  # UID 3000 for rspamd (unique per service for isolation)
   passwdFile = pkgs.writeText "passwd" ''
     root:x:0:0:root:/root:/bin/sh
-    rspamd:x:1000:1000:Rspamd:/var/lib/rspamd:/bin/false
+    rspamd:x:3000:3000:Rspamd:/var/lib/rspamd:/bin/false
     nobody:x:65534:65534:Nobody:/var/empty:/bin/false
   '';
 
   groupFile = pkgs.writeText "group" ''
     root:x:0:
-    rspamd:x:1000:
+    rspamd:x:3000:
     nobody:x:65534:
   '';
 
   # Entrypoint script
+  # Directories created in extraCommands/fakeRootCommands with correct ownership
+  # Host pre-creates /data/rspamd with correct ownership via tmpfiles.rules
   entrypoint = pkgs.writeShellScriptBin "entrypoint" ''
     set -e
-
-    # Create required directories
-    mkdir -p /var/lib/rspamd
-    mkdir -p /var/run/rspamd
-    mkdir -p /data/rspamd
-    mkdir -p /data/rspamd/dkim
-
-    # Set permissions
-    chown -R rspamd:rspamd /var/lib/rspamd
-    chown -R rspamd:rspamd /var/run/rspamd
-    chown -R rspamd:rspamd /data/rspamd
-
-    # Link persistent data
-    if [ ! -L /var/lib/rspamd/bayes.sqlite ]; then
-      ln -sf /data/rspamd/bayes.sqlite /var/lib/rspamd/bayes.sqlite 2>/dev/null || true
-    fi
 
     # Check for config directory
     if [ ! -d /etc/rspamd ]; then
@@ -92,6 +79,14 @@ pkgs.dockerTools.buildLayeredImage {
     echo "group: files" >> etc/nsswitch.conf
     echo "hosts: files dns" >> etc/nsswitch.conf
   '';
+
+  # Use fakeRootCommands to set ownership (baked into image)
+  fakeRootCommands = ''
+    # rspamd directories owned by rspamd user (UID 3000)
+    chown -R 3000:3000 var/lib/rspamd
+    chown -R 3000:3000 var/run/rspamd
+  '';
+  enableFakechroot = true;
 
   config = {
     Entrypoint = [ "${entrypoint}/bin/entrypoint" ];

@@ -8,43 +8,23 @@ let
   opensmtpd-extras = pkgs.opensmtpd-extras;
 
   # Create a minimal passwd file for the mail user
+  # UID 2000 for smtpd (unique per service for isolation)
   passwdFile = pkgs.writeText "passwd" ''
     root:x:0:0:root:/root:/bin/sh
-    smtpd:x:1000:1000:OpenSMTPd:/var/empty:/bin/false
-    smtpq:x:1001:1001:OpenSMTPd Queue:/var/empty:/bin/false
-    vmail:x:5000:5000:Virtual Mail:/var/mail:/bin/false
+    smtpd:x:2000:2000:OpenSMTPd:/var/empty:/bin/false
+    smtpq:x:2001:2001:OpenSMTPd Queue:/var/empty:/bin/false
   '';
 
   groupFile = pkgs.writeText "group" ''
     root:x:0:
-    smtpd:x:1000:
-    smtpq:x:1001:
-    vmail:x:5000:
+    smtpd:x:2000:
+    smtpq:x:2001:
   '';
 
   # Entrypoint script
+  # Container runs as root initially - smtpd drops privileges internally
   entrypoint = pkgs.writeShellScriptBin "entrypoint" ''
     set -e
-
-    # Create required directories
-    mkdir -p /var/spool/smtpd
-    mkdir -p /var/spool/smtpd/offline
-    mkdir -p /var/spool/smtpd/purge
-    mkdir -p /var/empty
-    mkdir -p /data/mail
-    mkdir -p /data/certs
-
-    # Set permissions - spool must be owned by root with 711
-    chown root:root /var/spool/smtpd
-    chmod 711 /var/spool/smtpd
-
-    # Subdirectories have different ownership
-    # offline: owned by root:smtpq, mode 770
-    chown root:smtpq /var/spool/smtpd/offline
-    chmod 770 /var/spool/smtpd/offline
-    # purge: owned by smtpq:root, mode 700
-    chown smtpq:root /var/spool/smtpd/purge
-    chmod 700 /var/spool/smtpd/purge
 
     # Check for config file
     if [ ! -f /etc/smtpd/smtpd.conf ]; then
@@ -79,11 +59,14 @@ pkgs.dockerTools.buildLayeredImage {
     # Create directory structure
     mkdir -p etc/smtpd
     mkdir -p etc/ssl/certs
-    mkdir -p var/spool/smtpd
     mkdir -p var/empty
-    mkdir -p data/mail
     mkdir -p data/certs
     mkdir -p tmp
+
+    # Create spool directories (permissions set in fakeRootCommands)
+    mkdir -p var/spool/smtpd
+    mkdir -p var/spool/smtpd/offline
+    mkdir -p var/spool/smtpd/purge
 
     # Copy passwd and group files
     cp ${passwdFile} etc/passwd
@@ -98,6 +81,22 @@ pkgs.dockerTools.buildLayeredImage {
     ln -sf ${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt etc/ssl/certs/ca-certificates.crt
   '';
 
+  # Use fakeRootCommands to set ownership and permissions (baked into image)
+  fakeRootCommands = ''
+    # Spool directory permissions required by OpenSMTPd
+    chown root:root var/spool/smtpd
+    chmod 711 var/spool/smtpd
+
+    # offline: owned by root:smtpq, mode 770
+    chown root:2001 var/spool/smtpd/offline
+    chmod 770 var/spool/smtpd/offline
+
+    # purge: owned by smtpq:root, mode 700
+    chown 2001:root var/spool/smtpd/purge
+    chmod 700 var/spool/smtpd/purge
+  '';
+  enableFakechroot = true;
+
   config = {
     Entrypoint = [ "${entrypoint}/bin/entrypoint" ];
     ExposedPorts = {
@@ -107,7 +106,6 @@ pkgs.dockerTools.buildLayeredImage {
     };
     Volumes = {
       "/etc/smtpd" = {};
-      "/data/mail" = {};
       "/data/certs" = {};
     };
     Env = [

@@ -10,15 +10,16 @@ let
   redis = pkgs.redis;
 
   # Create a minimal passwd file
+  # UID 4000 for redis (unique per service for isolation)
   passwdFile = pkgs.writeText "passwd" ''
     root:x:0:0:root:/root:/bin/sh
-    redis:x:1000:1000:Redis:/var/lib/redis:/bin/false
+    redis:x:4000:4000:Redis:/var/lib/redis:/bin/false
     nobody:x:65534:65534:Nobody:/var/empty:/bin/false
   '';
 
   groupFile = pkgs.writeText "group" ''
     root:x:0:
-    redis:x:1000:
+    redis:x:4000:
     nobody:x:65534:
   '';
 
@@ -61,21 +62,13 @@ let
   '';
 
   # Entrypoint script
+  # Directories created in extraCommands/fakeRootCommands with correct ownership
+  # Host pre-creates /data/redis with correct ownership via tmpfiles.rules
   entrypoint = pkgs.writeShellScriptBin "entrypoint" ''
     set -e
 
-    # Create required directories
-    mkdir -p /data/redis
-    mkdir -p /var/lib/redis
-    mkdir -p /var/run/redis
-
-    # Set permissions
-    chown -R redis:redis /data/redis
-    chown -R redis:redis /var/lib/redis
-    chown -R redis:redis /var/run/redis
-
     echo "Starting Redis..."
-    exec ${redis}/bin/redis-server /etc/redis/redis.conf --user redis
+    exec ${redis}/bin/redis-server /etc/redis/redis.conf
   '';
 
 in
@@ -110,6 +103,14 @@ pkgs.dockerTools.buildLayeredImage {
     echo "group: files" >> etc/nsswitch.conf
     echo "hosts: files dns" >> etc/nsswitch.conf
   '';
+
+  # Use fakeRootCommands to set ownership (baked into image)
+  fakeRootCommands = ''
+    # redis directories owned by redis user (UID 4000)
+    chown -R 4000:4000 var/lib/redis
+    chown -R 4000:4000 var/run/redis
+  '';
+  enableFakechroot = true;
 
   config = {
     Entrypoint = [ "${entrypoint}/bin/entrypoint" ];
