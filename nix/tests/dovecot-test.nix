@@ -71,8 +71,9 @@ pkgs.testers.runNixOSTest {
 
     # Pre-populate Maildir with test messages for both users
     with subtest("Pre-populate test mailboxes"):
-        # Create Maildir structure for alice@test.local
+        # Create Maildir structure for alice@test.local (including Junk folder)
         mail.succeed("mkdir -p /data/mail/alice/{cur,new,tmp}")
+        mail.succeed("mkdir -p /data/mail/alice/.Junk/{cur,new,tmp}")
         mail.succeed("""
             cat > /data/mail/alice/new/1234567890.alice.mail <<'EOF'
     Return-Path: <sender@external.com>
@@ -288,6 +289,39 @@ pkgs.testers.runNixOSTest {
         # Search for Alice's message in Bob's mailbox should return empty
         assert "* SEARCH\r" in result or "* SEARCH 2" not in result, \
             f"Bob can see Alice's LMTP message (isolation failure): {result}"
+
+    # Test spam filtering via sieve: X-Spam: Yes header -> Junk folder
+    with subtest("LMTP spam filtering delivers to Junk folder"):
+        # Send a message with X-Spam: Yes header via LMTP
+        mail.succeed("""
+            (
+                echo "LHLO localhost"
+                sleep 0.5
+                echo "MAIL FROM:<spammer@example.com>"
+                sleep 0.5
+                echo "RCPT TO:<alice>"
+                sleep 0.5
+                echo "DATA"
+                sleep 0.5
+                echo "From: spammer@example.com"
+                echo "To: alice@test.local"
+                echo "Subject: Spam Test Message"
+                echo "X-Spam: Yes"
+                echo "Message-ID: <spam-filter-test@example.com>"
+                echo ""
+                echo "This message has X-Spam: Yes and should go to Junk."
+                echo "."
+                sleep 0.5
+                echo "QUIT"
+            ) | ${pkgs.netcat}/bin/nc localhost 24
+        """)
+        time.sleep(2)
+
+        # Verify message is in Junk folder
+        junk_content = mail.succeed("cat /data/mail/alice/.Junk/new/* /data/mail/alice/.Junk/cur/* 2>/dev/null || echo 'empty'")
+        assert "Spam Test Message" in junk_content, \
+            f"Spam message not found in Junk folder: {junk_content[:500]}"
+        print("SUCCESS: Spam message correctly delivered to Junk folder")
 
     print("Dovecot standalone test passed!")
   '';
