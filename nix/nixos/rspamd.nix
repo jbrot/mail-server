@@ -100,13 +100,14 @@ let
   optionsInc = pkgs.writeText "options.inc" ''
     # Rspamd general options
 
-    # DNS settings
+    ${lib.optionalString (cfg.dnsServers != []) ''
+    # DNS settings (if empty, uses system resolver)
     dns {
       nameserver = [${lib.concatMapStringsSep ", " (s: "\"${s}\"") cfg.dnsServers}];
       timeout = 5s;
       retransmits = 2;
     }
-
+    ''}
     # Local networks (trusted)
     local_addrs = [${lib.concatMapStringsSep ", " (s: "\"${s}\"") cfg.localNetworks}];
   '';
@@ -263,8 +264,8 @@ in
 
     dnsServers = lib.mkOption {
       type = lib.types.listOf lib.types.str;
-      default = [ "8.8.8.8" "1.1.1.1" ];
-      description = "DNS servers for RBL lookups";
+      default = [];
+      description = "DNS servers for RBL lookups. If empty, uses system resolver.";
     };
 
     # Logging

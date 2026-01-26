@@ -1,4 +1,4 @@
-# Mail server module - Podman containers for OpenSMTPd, Dovecot, Rspamd
+# Full mail server module - integrates OpenSMTPd, Dovecot, and Rspamd
 # nix/nixos/mail-server.nix
 
 { config, lib, pkgs, ... }:
@@ -12,7 +12,44 @@ let
 
 in
 {
+  imports = [
+    ./opensmtpd.nix
+    ./dovecot.nix
+    ./rspamd.nix
+  ];
+
   options.services.mailServer = {
+    enable = lib.mkEnableOption "Complete mail server stack";
+
+    domain = lib.mkOption {
+      type = lib.types.str;
+      example = "example.com";
+      description = "Primary email domain";
+    };
+
+    hostname = lib.mkOption {
+      type = lib.types.str;
+      example = "mail.example.com";
+      description = "Mail server hostname (MX record target)";
+    };
+
+    users = lib.mkOption {
+      type = lib.types.attrsOf lib.types.str;
+      default = {};
+      example = { "alice" = "$6$..."; "bob" = "$6$..."; };
+      description = "Mail users with SHA512-CRYPT password hashes";
+    };
+
+    aliases = lib.mkOption {
+      type = lib.types.attrsOf lib.types.str;
+      default = {
+        "postmaster" = "admin";
+        "abuse" = "admin";
+      };
+      description = "Email aliases (name -> target username)";
+    };
+
+    # Image configuration
     images = {
       opensmtpd = lib.mkOption {
         type = lib.types.str;
@@ -29,21 +66,109 @@ in
         default = "${defaultEcrRegistry}/${defaultProjectName}/rspamd:latest";
         description = "Rspamd container image";
       };
+      redis = lib.mkOption {
+        type = lib.types.str;
+        default = "${defaultEcrRegistry}/${defaultProjectName}/redis:latest";
+        description = "Redis container image";
+      };
     };
+
     useEcr = lib.mkOption {
       type = lib.types.bool;
       default = true;
       description = "Whether to use ECR for images (enables ECR login service)";
     };
+
+    # DKIM configuration
+    dkim = {
+      enable = lib.mkOption {
+        type = lib.types.bool;
+        default = true;
+        description = "Enable DKIM signing for outbound mail";
+      };
+
+      selector = lib.mkOption {
+        type = lib.types.str;
+        default = "mail";
+        description = "DKIM selector";
+      };
+    };
+
+    # Debug options
+    debug = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
+      description = "Enable debug logging for all services";
+    };
   };
 
-  config = {
-    # ECR login service - refreshes credentials periodically
+  config = lib.mkIf cfg.enable {
+    # === Rspamd Configuration ===
+    services.rspamdContainer = {
+      enable = true;
+      image = cfg.images.rspamd;
+      redisImage = cfg.images.redis;
+
+      logLevel = if cfg.debug then "debug" else "info";
+
+      dkim = {
+        enable = cfg.dkim.enable;
+        selector = cfg.dkim.selector;
+      };
+
+      bayes = {
+        enable = true;
+        autolearn = {
+          spamThreshold = 7.0;
+          hamThreshold = -0.5;
+        };
+      };
+    };
+
+    # === Dovecot Configuration ===
+    services.dovecotContainer = {
+      enable = true;
+      image = cfg.images.dovecot;
+      users = cfg.users;
+
+      enableLmtp = true;
+
+      # Enable rspamd integration for spam/ham learning via imap_sieve
+      rspamd.enable = true;
+    };
+
+    # === OpenSMTPd Configuration ===
+    services.opensmtpdContainer = {
+      enable = true;
+      image = cfg.images.opensmtpd;
+
+      serverDomain = cfg.hostname;
+      emailDomain = cfg.domain;
+
+      credentials = cfg.users;
+      aliases = cfg.aliases;
+
+      # Deliver via LMTP to Dovecot
+      localDelivery = false;
+      lmtpPort = 24;
+
+      # Enable rspamd filter
+      enableRspamd = true;
+    };
+
+    # === Service Ordering ===
+    # Redis starts first, then rspamd, then dovecot, then opensmtpd
+    systemd.services.podman-rspamd.after = [ "podman-rspamd-redis.service" ];
+    systemd.services.podman-dovecot.after = [ "podman-rspamd.service" ];
+    systemd.services.podman-opensmtpd.after = [ "podman-dovecot.service" "podman-rspamd.service" ];
+
+    # === ECR Login (for production) ===
     systemd.services.ecr-login = lib.mkIf cfg.useEcr {
       description = "Login to AWS ECR";
       wantedBy = [ "multi-user.target" ];
       wants = [ "network-online.target" ];
       after = [ "network-online.target" ];
+      before = [ "podman-rspamd-redis.service" "podman-rspamd.service" "podman-dovecot.service" "podman-opensmtpd.service" ];
       serviceConfig = {
         Type = "oneshot";
         RemainAfterExit = true;
@@ -59,240 +184,35 @@ in
       wantedBy = [ "timers.target" ];
       timerConfig = {
         OnBootSec = "0";
-        OnUnitActiveSec = "6h";  # Refresh every 6 hours
+        OnUnitActiveSec = "6h";
         RandomizedDelaySec = "5m";
       };
     };
 
-    # Rspamd container - starts first (other services depend on it)
-    virtualisation.oci-containers.containers.rspamd = {
-      image = cfg.images.rspamd;
-      autoStart = true;
-
-      # Use host network for simplicity
-      extraOptions = [
-        "--network=host"
-        "--cap-add=NET_BIND_SERVICE"
-      ];
-
-      # Volume mounts
-      volumes = [
-        "/data/rspamd:/data/rspamd"
-        "/etc/rspamd/local.d:/etc/rspamd/local.d:ro"
-      ];
-
-      # Environment
-      environment = {
-        TZ = "UTC";
-      };
+    # Add ECR dependency to container services
+    systemd.services.podman-rspamd-redis = lib.mkIf cfg.useEcr {
+      after = [ "ecr-login.service" ];
+      requires = [ "ecr-login.service" ];
     };
 
-    # Dovecot container - IMAP and LMTP
-    virtualisation.oci-containers.containers.dovecot = {
-      image = cfg.images.dovecot;
-      autoStart = true;
-
-      # Use host network
-      extraOptions = [
-        "--network=host"
-        "--cap-add=NET_BIND_SERVICE"
-        "--cap-add=SETUID"
-        "--cap-add=SETGID"
-      ];
-
-      # Volume mounts
-      volumes = [
-        "/data/mail:/data/mail"
-        "/data/certs:/data/certs:ro"
-        "/etc/dovecot:/etc/dovecot:ro"
-      ];
-
-      # Environment
-      environment = {
-        TZ = "UTC";
-      };
-
-      # Wait for rspamd
-      dependsOn = [ "rspamd" ];
-    };
-
-    # OpenSMTPd container - SMTP
-    virtualisation.oci-containers.containers.opensmtpd = {
-      image = cfg.images.opensmtpd;
-      autoStart = true;
-
-      # Use host network
-      extraOptions = [
-        "--network=host"
-        "--cap-add=NET_BIND_SERVICE"
-        "--cap-add=SETUID"
-        "--cap-add=SETGID"
-      ];
-
-      # Volume mounts
-      volumes = [
-        "/data/mail:/data/mail"
-        "/data/certs:/data/certs:ro"
-        "/etc/smtpd:/etc/smtpd:ro"
-      ];
-
-      # Environment
-      environment = {
-        TZ = "UTC";
-      };
-
-      # Wait for dovecot and rspamd
-      dependsOn = [ "dovecot" "rspamd" ];
-    };
-
-    # Container service dependencies and ordering
-    systemd.services.podman-rspamd = {
-      after = [ "network-online.target" ] ++ lib.optionals cfg.useEcr [ "ecr-login.service" ];
-      requires = lib.optionals cfg.useEcr [ "ecr-login.service" ];
-      serviceConfig = {
-        Restart = "always";
-        RestartSec = "10s";
-      };
-    };
-
-    systemd.services.podman-dovecot = {
-      after = [ "podman-rspamd.service" "network-online.target" ] ++ lib.optionals cfg.useEcr [ "ecr-login.service" ];
-      requires = lib.optionals cfg.useEcr [ "ecr-login.service" ];
-      serviceConfig = {
-        Restart = "always";
-        RestartSec = "10s";
-      };
-    };
-
-    systemd.services.podman-opensmtpd = {
-      after = [ "podman-dovecot.service" "podman-rspamd.service" "network-online.target" ] ++ lib.optionals cfg.useEcr [ "ecr-login.service" ];
-      requires = lib.optionals cfg.useEcr [ "ecr-login.service" ];
-      serviceConfig = {
-        Restart = "always";
-        RestartSec = "10s";
-      };
-    };
-
-    # Create configuration directories and files
+    # === Data Directories ===
     systemd.tmpfiles.rules = [
-      # Rspamd config directory
-      "d /etc/rspamd 0755 root root -"
-      "d /etc/rspamd/local.d 0755 root root -"
-      "d /etc/rspamd/override.d 0755 root root -"
-
-      # Dovecot config directory
-      "d /etc/dovecot 0755 root root -"
-
-      # OpenSMTPd config directory
-      "d /etc/smtpd 0755 root root -"
+      "d /data 0755 root root -"
+      "d /data/mail 0700 5000 5000 -"
+      "d /data/certs 0755 root root -"
+      "d /data/rspamd 0755 1000 1000 -"
+      "d /data/rspamd/dkim 0700 1000 1000 -"
+      "d /data/redis 0755 1000 1000 -"
+      "d /data/sieve 0700 5000 5000 -"
     ];
 
-    # Deploy configuration files
-    environment.etc = {
-      # OpenSMTPd configuration
-      "smtpd/smtpd.conf" = {
-        source = ../config/smtpd.conf;
-        mode = "0644";
-      };
-
-      # OpenSMTPd aliases (empty by default)
-      "smtpd/aliases" = {
-        text = ''
-          # Aliases file
-          # Format: alias: target
-          postmaster: root
-          abuse: root
-          root: admin@example.com
-        '';
-        mode = "0644";
-      };
-
-      # OpenSMTPd domains
-      "smtpd/domains" = {
-        text = ''
-          # Virtual domains (one per line)
-          example.com
-        '';
-        mode = "0644";
-      };
-
-      # OpenSMTPd virtual users mapping
-      "smtpd/virtuals" = {
-        text = ''
-          # Virtual user mapping
-          # Format: user@domain: vmail
-          # All mail delivered to vmail user, organized by domain/user in Maildir
-          @example.com    vmail
-        '';
-        mode = "0644";
-      };
-
-      # Dovecot configuration
-      "dovecot/dovecot.conf" = {
-        source = ../config/dovecot.conf;
-        mode = "0644";
-      };
-
-      # Dovecot users file (password hashes)
-      "dovecot/users" = {
-        text = ''
-          # User database for Dovecot authentication
-          # Format: user@domain:{scheme}password
-          # Generate password hash with: doveadm pw -s SHA512-CRYPT
-          # Example:
-          # user@example.com:{SHA512-CRYPT}$6$...
-        '';
-        mode = "0600";
-      };
-
-      # Rspamd local.d configurations
-      "rspamd/local.d/worker-normal.inc" = {
-        source = ../config/rspamd/worker-normal.inc;
-        mode = "0644";
-      };
-
-      "rspamd/local.d/worker-proxy.inc" = {
-        source = ../config/rspamd/worker-proxy.inc;
-        mode = "0644";
-      };
-
-      "rspamd/local.d/worker-controller.inc" = {
-        source = ../config/rspamd/worker-controller.inc;
-        mode = "0644";
-      };
-
-      "rspamd/local.d/dkim_signing.conf" = {
-        source = ../config/rspamd/dkim_signing.conf;
-        mode = "0644";
-      };
-
-      "rspamd/local.d/classifier-bayes.conf" = {
-        source = ../config/rspamd/classifier-bayes.conf;
-        mode = "0644";
-      };
-
-      "rspamd/local.d/logging.inc" = {
-        source = ../config/rspamd/logging.inc;
-        mode = "0644";
-      };
-
-      "rspamd/local.d/actions.conf" = {
-        source = ../config/rspamd/actions.conf;
-        mode = "0644";
-      };
-
-      "rspamd/local.d/options.inc" = {
-        source = ../config/rspamd/options.inc;
-        mode = "0644";
-      };
-    };
-
-    # DKIM key generation helper script
+    # === Helper Scripts ===
     environment.systemPackages = [
+      # DKIM key generation
       (pkgs.writeShellScriptBin "generate-dkim-key" ''
         set -e
-        DOMAIN="''${1:-example.com}"
-        SELECTOR="''${2:-mail}"
+        DOMAIN="''${1:-${cfg.domain}}"
+        SELECTOR="''${2:-${cfg.dkim.selector}}"
         KEY_DIR="/data/rspamd/dkim"
 
         mkdir -p "$KEY_DIR"
@@ -307,7 +227,7 @@ in
         ${pkgs.rspamd}/bin/rspamadm dkim_keygen -s "$SELECTOR" -d "$DOMAIN" \
           -k "$KEY_DIR/$DOMAIN.$SELECTOR.key" > "$KEY_DIR/$DOMAIN.$SELECTOR.txt"
 
-        # Fix permissions
+        # Fix permissions for rspamd container
         chown 1000:1000 "$KEY_DIR/$DOMAIN.$SELECTOR.key"
         chmod 600 "$KEY_DIR/$DOMAIN.$SELECTOR.key"
 
@@ -316,6 +236,13 @@ in
         echo ""
         echo "Add this DNS TXT record:"
         cat "$KEY_DIR/$DOMAIN.$SELECTOR.txt"
+      '')
+
+      # User password hash generator
+      (pkgs.writeShellScriptBin "generate-password-hash" ''
+        echo "Enter password to hash:"
+        read -s PASSWORD
+        echo "$PASSWORD" | ${pkgs.mkpasswd}/bin/mkpasswd -m sha-512 -s
       '')
     ];
   };
