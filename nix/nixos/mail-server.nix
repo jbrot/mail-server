@@ -111,7 +111,7 @@ in
     services.rspamdContainer = {
       enable = true;
       image = cfg.images.rspamd;
-      redisImage = cfg.images.redis;
+      redis.image = cfg.images.redis;
 
       logLevel = if cfg.debug then "debug" else "info";
 
@@ -130,7 +130,7 @@ in
 
       # Network configuration (shared test-net)
       networking.networks = [ "test-net" ];
-      redisNetworking.networks = [ "test-net" ];
+      redis.networking.networks = [ "test-net" ];
     };
 
     # === Dovecot Configuration ===

@@ -84,7 +84,7 @@ let
 
     # Use Redis backend for Bayes data
     backend = "redis";
-    servers = "${cfg.redisHost}:${toString cfg.redisPort}";
+    servers = "${cfg.redis.host}:${toString cfg.redis.port}";
     new_schema = true;
 
     # Auto-learn from high-confidence results
@@ -100,7 +100,7 @@ let
   # Generate redis.conf for rspamd global Redis settings
   redisConf = pkgs.writeText "redis.conf" ''
     # Redis configuration for rspamd
-    servers = "${cfg.redisHost}:${toString cfg.redisPort}";
+    servers = "${cfg.redis.host}:${toString cfg.redis.port}";
   '';
 
   # Generate options.inc
@@ -132,47 +132,85 @@ in
       description = "Container image URI";
     };
 
-    redisImage = lib.mkOption {
-      type = lib.types.str;
-      description = "Redis container image URI";
-    };
-
-    redisPort = lib.mkOption {
-      type = lib.types.int;
-      default = 6379;
-      description = "Port for Redis server";
-    };
-
-    redisHost = lib.mkOption {
-      type = lib.types.str;
-      default = "redis";
-      description = "Hostname for Redis server (container name on shared network)";
-    };
-
     # Network configuration for rspamd container
-    networking.networks = lib.mkOption {
-      type = lib.types.listOf lib.types.str;
-      default = [];
-      description = "List of podman networks to attach";
+    networking = {
+      networks = lib.mkOption {
+        type = lib.types.listOf lib.types.str;
+        default = [];
+        description = "List of podman networks to attach";
+      };
+
+      publishPorts = lib.mkOption {
+        type = lib.types.listOf lib.types.str;
+        default = [];
+        description = "Ports to publish (e.g., '11333:11333')";
+      };
     };
 
-    networking.publishPorts = lib.mkOption {
-      type = lib.types.listOf lib.types.str;
-      default = [];
-      description = "Ports to publish (e.g., '11333:11333')";
-    };
+    # Redis container configuration
+    redis = {
+      image = lib.mkOption {
+        type = lib.types.str;
+        description = "Redis container image URI";
+      };
 
-    # Network configuration for redis container
-    redisNetworking.networks = lib.mkOption {
-      type = lib.types.listOf lib.types.str;
-      default = [];
-      description = "List of podman networks to attach";
-    };
+      port = lib.mkOption {
+        type = lib.types.int;
+        default = 6379;
+        description = "Port for Redis server";
+      };
 
-    redisNetworking.publishPorts = lib.mkOption {
-      type = lib.types.listOf lib.types.str;
-      default = [];
-      description = "Ports to publish (e.g., '6379:6379')";
+      host = lib.mkOption {
+        type = lib.types.str;
+        default = "redis";
+        description = "Hostname for Redis server (container name on shared network)";
+      };
+
+      networking = {
+        networks = lib.mkOption {
+          type = lib.types.listOf lib.types.str;
+          default = [];
+          description = "List of podman networks to attach";
+        };
+
+        publishPorts = lib.mkOption {
+          type = lib.types.listOf lib.types.str;
+          default = [];
+          description = "Ports to publish (e.g., '6379:6379')";
+        };
+      };
+
+      resources = {
+        memory = lib.mkOption {
+          type = lib.types.int;
+          default = 256;
+          description = "Redis container memory limit in MB";
+        };
+
+        memoryReservation = lib.mkOption {
+          type = lib.types.int;
+          default = 128;
+          description = "Redis container memory reservation (soft limit) in MB";
+        };
+
+        memoryBuffer = lib.mkOption {
+          type = lib.types.int;
+          default = 32;
+          description = "Memory reserved for Redis process overhead in MB (subtracted from container limit for maxmemory)";
+        };
+
+        cpus = lib.mkOption {
+          type = lib.types.float;
+          default = 0.5;
+          description = "CPU limit";
+        };
+
+        pidsLimit = lib.mkOption {
+          type = lib.types.int;
+          default = 50;
+          description = "Maximum number of PIDs in the container";
+        };
+      };
     };
 
     # Resource limits for rspamd container
@@ -198,39 +236,6 @@ in
       pidsLimit = lib.mkOption {
         type = lib.types.int;
         default = 200;
-        description = "Maximum number of PIDs in the container";
-      };
-    };
-
-    # Resource limits for redis container
-    redisResources = {
-      memory = lib.mkOption {
-        type = lib.types.int;
-        default = 256;
-        description = "Redis container memory limit in MB";
-      };
-
-      memoryReservation = lib.mkOption {
-        type = lib.types.int;
-        default = 128;
-        description = "Redis container memory reservation (soft limit) in MB";
-      };
-
-      memoryBuffer = lib.mkOption {
-        type = lib.types.int;
-        default = 32;
-        description = "Memory reserved for Redis process overhead in MB (subtracted from container limit for maxmemory)";
-      };
-
-      cpus = lib.mkOption {
-        type = lib.types.float;
-        default = 0.5;
-        description = "CPU limit";
-      };
-
-      pidsLimit = lib.mkOption {
-        type = lib.types.int;
-        default = 50;
         description = "Maximum number of PIDs in the container";
       };
     };
@@ -366,22 +371,22 @@ in
   config = lib.mkIf cfg.enable {
     # Redis container for rspamd backend
     virtualisation.oci-containers.containers.rspamd-redis = {
-      image = cfg.redisImage;
+      image = cfg.redis.image;
       autoStart = true;
 
       extraOptions =
         # Network configuration
-        (map (net: "--network=${net}") cfg.redisNetworking.networks)
+        (map (net: "--network=${net}") cfg.redis.networking.networks)
         ++ [ "--hostname=redis" ]
-        ++ (map (p: "-p=${p}") cfg.redisNetworking.publishPorts)
+        ++ (map (p: "-p=${p}") cfg.redis.networking.publishPorts)
         ++ [
           # Run as redis user (UID 4000)
           "--user=4000:4000"
           # Resource limits
-          "--memory=${toString cfg.redisResources.memory}m"
-          "--memory-reservation=${toString cfg.redisResources.memoryReservation}m"
-          "--cpus=${toString cfg.redisResources.cpus}"
-          "--pids-limit=${toString cfg.redisResources.pidsLimit}"
+          "--memory=${toString cfg.redis.resources.memory}m"
+          "--memory-reservation=${toString cfg.redis.resources.memoryReservation}m"
+          "--cpus=${toString cfg.redis.resources.cpus}"
+          "--pids-limit=${toString cfg.redis.resources.pidsLimit}"
         ];
 
       # Volume mounts
@@ -390,7 +395,7 @@ in
       ];
 
       # Calculate Redis maxmemory from container limit minus buffer for overhead
-      cmd = [ "--maxmemory" "${toString (cfg.redisResources.memory - cfg.redisResources.memoryBuffer)}mb" ];
+      cmd = [ "--maxmemory" "${toString (cfg.redis.resources.memory - cfg.redis.resources.memoryBuffer)}mb" ];
 
       # Environment
       environment = {

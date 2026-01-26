@@ -26,7 +26,7 @@ pkgs.testers.runNixOSTest {
     services.rspamdContainer = {
       enable = true;
       image = "docker-archive:${self.packages.${pkgs.system}.rspamd-image}";
-      redisImage = "docker-archive:${self.packages.${pkgs.system}.redis-image}";
+      redis.image = "docker-archive:${self.packages.${pkgs.system}.redis-image}";
 
       # Debug logging
       logLevel = "info";
@@ -34,8 +34,8 @@ pkgs.testers.runNixOSTest {
       # Use isolated network
       networking.networks = [ "test-net" ];
       networking.publishPorts = [ "11333:11333" "11334:11334" ];
-      redisNetworking.networks = [ "test-net" ];
-      redisNetworking.publishPorts = [ "6379:6379" ];
+      redis.networking.networks = [ "test-net" ];
+      redis.networking.publishPorts = [ "6379:6379" ];
     };
 
     # === Dovecot Configuration ===
