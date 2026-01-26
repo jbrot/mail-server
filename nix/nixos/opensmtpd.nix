@@ -23,6 +23,7 @@ let
     ${lib.optionalString (cfg.credentials != {}) "table users file:/etc/smtpd/userbase"}
 
     # Filters
+    ${lib.optionalString cfg.enableDnsFilters ''
     filter check_dyndns phase connect match rdns regex { '.*\.dyn\..*', '.*\.dsl\..*' } \
         disconnect "550 no residential connections"
 
@@ -31,14 +32,19 @@ let
 
     filter check_fcrdns phase connect match !fcrdns \
         disconnect "550 no FCrDNS is so 80s"
-
+    ''}
     ${lib.optionalString cfg.enableRspamd ''
     filter rspamd proc-exec "${pkgs.opensmtpd-filter-rspamd}/bin/filter-rspamd -url http://${cfg.rspamdHost}:11333"
     ''}
 
     # Listen on all interfaces
     # Port 25 - SMTP (for receiving mail from other servers)
-    listen on 0.0.0.0 port 25 tls pki ${cfg.serverDomain} filter { check_dyndns, check_rdns, check_fcrdns${lib.optionalString cfg.enableRspamd ", rspamd"} }
+    ${let
+      dnsFilters = lib.optionalString cfg.enableDnsFilters "check_dyndns, check_rdns, check_fcrdns";
+      rspamdFilter = lib.optionalString cfg.enableRspamd "rspamd";
+      allFilters = lib.filter (s: s != "") [ dnsFilters rspamdFilter ];
+      filterClause = if allFilters == [] then "" else " filter { ${lib.concatStringsSep ", " allFilters} }";
+    in "listen on 0.0.0.0 port 25 tls pki ${cfg.serverDomain}${filterClause}"}
 
     # Port 587 - Submission (STARTTLS, for client submission)
     listen on 0.0.0.0 port 587 tls-require pki ${cfg.serverDomain} auth ${lib.optionalString (cfg.credentials != {}) "<credentials>"}${lib.optionalString cfg.enableRspamd " filter rspamd"}
@@ -99,6 +105,12 @@ in
       type = lib.types.bool;
       default = false;
       description = "Enable rspamd filter";
+    };
+
+    enableDnsFilters = lib.mkOption {
+      type = lib.types.bool;
+      default = true;
+      description = "Enable DNS-based filters (rDNS, FCrDNS, dyndns check). Disable for container/test environments without proper DNS.";
     };
 
     aliases = lib.mkOption {

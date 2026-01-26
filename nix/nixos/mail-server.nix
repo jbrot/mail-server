@@ -16,7 +16,7 @@ in
     ./opensmtpd.nix
     ./dovecot.nix
     ./rspamd.nix
-    ./test-network.nix
+    ./mail-networks.nix
   ];
 
   options.services.mailServer = {
@@ -104,8 +104,9 @@ in
   };
 
   config = lib.mkIf cfg.enable {
-    # Enable test network for container communication
-    services.testNetwork.enable = true;
+    # mail-networks.nix creates 7 isolated networks:
+    # - External: mail-smtp-external, mail-imap-external, mail-rspamd-external
+    # - Internal: mail-smtp-rspamd, mail-smtp-lmtp, mail-rspamd-redis, mail-dovecot-rspamd
 
     # === Rspamd Configuration ===
     services.rspamdContainer = {
@@ -128,9 +129,10 @@ in
         };
       };
 
-      # Network configuration (shared test-net)
-      networking.networks = [ "test-net" ];
-      redis.networking.networks = [ "test-net" ];
+      # Network: rspamd-external (RBL lookups), smtp-rspamd (milter), rspamd-redis, dovecot-rspamd (learning)
+      networking.networks = [ "mail-rspamd-external" "mail-smtp-rspamd" "mail-rspamd-redis" "mail-dovecot-rspamd" ];
+      redis.host = "redis";
+      redis.networking.networks = [ "mail-rspamd-redis" ];
     };
 
     # === Dovecot Configuration ===
@@ -147,8 +149,8 @@ in
         host = "rspamd:11334";
       };
 
-      # Network configuration (shared test-net)
-      networking.networks = [ "test-net" ];
+      # Network: imap-external (client access), smtp-lmtp (delivery), dovecot-rspamd (learning)
+      networking.networks = [ "mail-imap-external" "mail-smtp-lmtp" "mail-dovecot-rspamd" ];
       networking.publishPorts = [ "993:993" "143:143" ];
     };
 
@@ -166,27 +168,32 @@ in
       # Deliver via LMTP to Dovecot
       localDelivery = false;
       lmtpPort = 24;
+      lmtpHost = "dovecot";
 
       # Enable rspamd filter
       enableRspamd = true;
+      rspamdHost = "rspamd";
 
-      # Network configuration (shared test-net)
-      networking.networks = [ "test-net" ];
+      # Disable DNS filters - container networks don't have rDNS/FCrDNS
+      enableDnsFilters = false;
+
+      # Network: smtp-external (inbound/outbound), smtp-rspamd (filtering), smtp-lmtp (delivery)
+      networking.networks = [ "mail-smtp-external" "mail-smtp-rspamd" "mail-smtp-lmtp" ];
       networking.publishPorts = [ "25:25" "587:587" ];
     };
 
     # === Service Ordering ===
     # Redis starts first, then rspamd, then dovecot, then opensmtpd
-    # All containers depend on network setup
+    # All containers depend on mail-network-setup
     # When ECR is enabled, all containers depend on ecr-login
     systemd.services.podman-rspamd-redis = {
-      after = [ "create-test-network.service" ]
+      after = [ "mail-network-setup.service" ]
         ++ lib.optionals cfg.useEcr [ "ecr-login.service" ];
       requires = lib.optionals cfg.useEcr [ "ecr-login.service" ];
     };
-    systemd.services.podman-rspamd.after = [ "podman-rspamd-redis.service" "create-test-network.service" ];
-    systemd.services.podman-dovecot.after = [ "podman-rspamd.service" "create-test-network.service" ];
-    systemd.services.podman-opensmtpd.after = [ "podman-dovecot.service" "podman-rspamd.service" "create-test-network.service" ];
+    systemd.services.podman-rspamd.after = [ "podman-rspamd-redis.service" "mail-network-setup.service" ];
+    systemd.services.podman-dovecot.after = [ "podman-rspamd.service" "mail-network-setup.service" ];
+    systemd.services.podman-opensmtpd.after = [ "podman-dovecot.service" "podman-rspamd.service" "mail-network-setup.service" ];
 
     # === ECR Login (for production) ===
     systemd.services.ecr-login = lib.mkIf cfg.useEcr {
