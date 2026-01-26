@@ -101,6 +101,13 @@ in
       default = false;
       description = "Enable debug logging for all services";
     };
+
+    # DNS-based spam filters
+    enableDnsFilters = lib.mkOption {
+      type = lib.types.bool;
+      default = true;
+      description = "Enable DNS-based SMTP filters (rDNS, FCrDNS, dyndns check). Disable for testing without proper DNS.";
+    };
   };
 
   config = lib.mkIf cfg.enable {
@@ -131,7 +138,6 @@ in
 
       # Network: rspamd-external (RBL lookups), smtp-rspamd (milter), rspamd-redis, dovecot-rspamd (learning)
       networking.networks = [ "mail-rspamd-external" "mail-smtp-rspamd" "mail-rspamd-redis" "mail-dovecot-rspamd" ];
-      redis.host = "redis";
       redis.networking.networks = [ "mail-rspamd-redis" ];
     };
 
@@ -144,10 +150,7 @@ in
       enableLmtp = true;
 
       # Enable rspamd integration for spam/ham learning via imap_sieve
-      rspamd = {
-        enable = true;
-        host = "rspamd:11334";
-      };
+      rspamd.enable = true;
 
       # Network: imap-external (client access), smtp-lmtp (delivery), dovecot-rspamd (learning)
       networking.networks = [ "mail-imap-external" "mail-smtp-lmtp" "mail-dovecot-rspamd" ];
@@ -167,15 +170,12 @@ in
 
       # Deliver via LMTP to Dovecot
       localDelivery = false;
-      lmtpPort = 24;
-      lmtpHost = "dovecot";
 
       # Enable rspamd filter
       enableRspamd = true;
-      rspamdHost = "rspamd";
 
-      # Disable DNS filters - container networks don't have rDNS/FCrDNS
-      enableDnsFilters = false;
+      # DNS filters (rDNS/FCrDNS) - configurable for environments without proper DNS
+      enableDnsFilters = cfg.enableDnsFilters;
 
       # Network: smtp-external (inbound/outbound), smtp-rspamd (filtering), smtp-lmtp (delivery)
       networking.networks = [ "mail-smtp-external" "mail-smtp-rspamd" "mail-smtp-lmtp" ];

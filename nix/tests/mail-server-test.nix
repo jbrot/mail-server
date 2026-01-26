@@ -47,6 +47,9 @@ pkgs.testers.runNixOSTest {
 
       # Disable DKIM for testing (no keys generated)
       dkim.enable = false;
+
+      # Disable DNS filters for testing (no rDNS/FCrDNS in VM environment)
+      enableDnsFilters = false;
     };
 
     # Add custom rspamd multimap rule for test spam detection (RBLs won't work without DNS)
