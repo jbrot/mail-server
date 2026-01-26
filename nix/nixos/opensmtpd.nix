@@ -138,15 +138,19 @@ in
       extraOptions = [
         "--network=host"
         "--cap-add=NET_BIND_SERVICE"
+      ] ++ lib.optionals cfg.localDelivery [
+        # SETUID/SETGID only needed for local maildir delivery, not LMTP
         "--cap-add=SETUID"
         "--cap-add=SETGID"
       ];
 
       # Volume mounts
+      # Note: /data/mail is only needed for local delivery, not LMTP (Dovecot handles storage)
       volumes = [
-        "/data/mail:/data/mail"
         "/data/certs:/data/certs:ro"
         "/etc/smtpd:/etc/smtpd:ro"
+      ] ++ lib.optionals cfg.localDelivery [
+        "/data/mail:/data/mail"
       ];
 
       # Environment
@@ -170,6 +174,8 @@ in
     # Create configuration directories
     systemd.tmpfiles.rules = [
       "d /etc/smtpd 0755 root root -"
+    ] ++ lib.optionals cfg.localDelivery [
+      # Only create mail directory when using local delivery (not LMTP)
       "d /data/mail 0700 ${toString cfg.mailUid} ${toString cfg.mailGid} -"
     ];
 
