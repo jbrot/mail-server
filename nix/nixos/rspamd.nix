@@ -31,12 +31,14 @@ let
     # Web UI and management interface
     bind_socket = "0.0.0.0:${toString cfg.controllerPort}";
 
+    ${lib.optionalString (cfg.controller.password != "") ''
     # Password for web UI (generate with: rspamadm pw)
     password = "${cfg.controller.password}";
-
+    ''}
+    ${lib.optionalString (cfg.controller.enablePassword != "") ''
     # Enable write access (for learning spam/ham)
     enable_password = "${cfg.controller.enablePassword}";
-
+    ''}
     # Allow passwordless access from trusted networks (localhost and container networks)
     secure_ip = "127.0.0.1";
     secure_ip = "::1";
@@ -324,18 +326,18 @@ in
       };
     };
 
-    # Controller passwords
+    # Controller passwords (optional - if not set, access is restricted to secure_ip networks)
     controller = {
       password = lib.mkOption {
         type = lib.types.str;
-        default = "$2$changeme";
-        description = "Password hash for web UI read access (generate with: rspamadm pw)";
+        default = "";
+        description = "Password hash for web UI read access (generate with: rspamadm pw). If empty, only secure_ip networks can access.";
       };
 
       enablePassword = lib.mkOption {
         type = lib.types.str;
-        default = "$2$changeme";
-        description = "Password hash for web UI write access (generate with: rspamadm pw)";
+        default = "";
+        description = "Password hash for web UI write access (generate with: rspamadm pw). If empty, write access requires secure_ip.";
       };
     };
 
