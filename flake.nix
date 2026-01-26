@@ -158,6 +158,11 @@
           dovecot-rspamd = import ./nix/tests/dovecot-rspamd-test.nix {
             inherit pkgs self;
           };
+
+          # TODO: Re-enable network-isolation test after implementing seven-network setup
+          # network-isolation = import ./nix/tests/network-isolation-test.nix {
+          #   inherit pkgs self;
+          # };
         } else {})
       );
     };

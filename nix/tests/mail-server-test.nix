@@ -85,7 +85,21 @@ pkgs.testers.runNixOSTest {
     # Disable firewall for testing
     networking.firewall.enable = false;
 
-    # Use localhost DNS to prevent DNS lookup hangs
+    # Use dnsmasq as local DNS server (fast-failing, no internet in VM tests)
+    services.dnsmasq = {
+      enable = true;
+      settings = {
+        no-resolv = true;
+        # No upstream servers - returns SERVFAIL immediately for unknown queries
+        interface = "lo";
+        bind-interfaces = true;
+        local = "/local/";
+        domain = "local";
+        expand-hosts = true;
+      };
+    };
+
+    # Point host DNS to local dnsmasq
     networking.nameservers = [ "127.0.0.1" ];
 
     # Set hostname
@@ -127,17 +141,13 @@ pkgs.testers.runNixOSTest {
         mail.succeed("mkdir -p /data/mail/testuser/.Trash/{cur,new,tmp}")
         mail.succeed("chown -R 5000:5000 /data/mail")
 
-    # Wait for Redis
+    # Wait for Redis (internal service - no port exposed to host)
     with subtest("Redis starts successfully"):
         mail.wait_for_unit("podman-rspamd-redis.service", timeout=120)
-        mail.wait_for_open_port(6379, timeout=60)
 
-    # Wait for Rspamd
+    # Wait for Rspamd (internal service - no ports exposed to host)
     with subtest("Rspamd starts successfully"):
         mail.wait_for_unit("podman-rspamd.service", timeout=120)
-        mail.wait_for_open_port(11332, timeout=60)  # Milter
-        mail.wait_for_open_port(11333, timeout=60)  # Normal
-        mail.wait_for_open_port(11334, timeout=60)  # Controller
         time.sleep(3)
 
     # Wait for Dovecot
@@ -145,7 +155,6 @@ pkgs.testers.runNixOSTest {
         mail.wait_for_unit("podman-dovecot.service", timeout=120)
         mail.wait_for_open_port(993, timeout=60)   # IMAPS
         mail.wait_for_open_port(143, timeout=60)   # IMAP
-        mail.wait_for_open_port(24, timeout=60)    # LMTP
 
     # Wait for OpenSMTPd
     with subtest("OpenSMTPd starts successfully"):
@@ -211,7 +220,6 @@ pkgs.testers.runNixOSTest {
 
     # Final status check
     with subtest("All services healthy"):
-        mail.succeed("curl -sf http://localhost:11334/ping")
         # Check container status
         mail.succeed("podman ps | grep -q rspamd-redis")
         mail.succeed("podman ps | grep -q rspamd")

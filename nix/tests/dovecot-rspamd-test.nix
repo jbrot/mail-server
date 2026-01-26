@@ -10,6 +10,7 @@ pkgs.testers.runNixOSTest {
   nodes.mail = { config, pkgs, lib, ... }: {
     imports = [
       ../nixos/test-certs.nix
+      ../nixos/test-network.nix
       ../nixos/dovecot.nix
       ../nixos/rspamd.nix
     ];
@@ -29,6 +30,12 @@ pkgs.testers.runNixOSTest {
 
       # Debug logging
       logLevel = "info";
+
+      # Use isolated network
+      networking.networks = [ "test-net" ];
+      networking.publishPorts = [ "11333:11333" "11334:11334" ];
+      redisNetworking.networks = [ "test-net" ];
+      redisNetworking.publishPorts = [ "6379:6379" ];
     };
 
     # === Dovecot Configuration ===
@@ -45,16 +52,23 @@ pkgs.testers.runNixOSTest {
       enableLmtp = false;
 
       # Enable rspamd integration (uses imap_sieve plugin)
-      rspamd = {
-        enable = true;
-        # Use default host (controller port 11334)
-      };
+      rspamd.enable = true;
+
+      # Use isolated network
+      networking.networks = [ "test-net" ];
+      networking.publishPorts = [ "993:993" "143:143" ];
     };
 
+    # Enable test network
+    services.testNetwork.enable = true;
+
     # Service ordering
+    systemd.services.podman-rspamd-redis.after = [ "create-test-network.service" ];
+    systemd.services.podman-rspamd.after = [ "create-test-network.service" ];
     systemd.services.podman-dovecot.after = [
       "generate-test-certs.service"
       "podman-rspamd.service"
+      "create-test-network.service"
     ];
 
     # Use tmpfs for /data
@@ -141,7 +155,7 @@ pkgs.testers.runNixOSTest {
 
         # Verify shell scripts have correct rspamd host (controller port 11334)
         result = mail.succeed("cat /etc/dovecot/sieve/sa-learn-spam.sh")
-        assert "127.0.0.1:11334" in result, f"Rspamd host not found in script: {result}"
+        assert "rspamd:11334" in result, f"Rspamd host not found in script: {result}"
 
     # Verify dovecot config has imap_sieve plugin
     with subtest("Dovecot imap_sieve plugin configured"):

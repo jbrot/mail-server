@@ -9,6 +9,7 @@ pkgs.testers.runNixOSTest {
   nodes.mail = { config, pkgs, lib, ... }: {
     imports = [
       ../nixos/test-certs.nix
+      ../nixos/test-network.nix
       ../nixos/dovecot.nix
     ];
 
@@ -31,10 +32,17 @@ pkgs.testers.runNixOSTest {
       };
 
       enableLmtp = true;
+
+      # Use test network
+      networking.networks = [ "test-net" ];
+      networking.publishPorts = [ "993:993" "143:143" "24:24" ];
     };
 
-    # Ensure certs are generated before Dovecot starts
-    systemd.services.podman-dovecot.after = [ "generate-test-certs.service" ];
+    # Enable test network (creates bridge network for containers)
+    services.testNetwork.enable = true;
+
+    # Ensure certs and network are ready before Dovecot starts
+    systemd.services.podman-dovecot.after = [ "generate-test-certs.service" "create-test-network.service" ];
 
     # Use tmpfs for /data
     fileSystems."/data" = {

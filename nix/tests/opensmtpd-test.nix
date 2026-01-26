@@ -9,6 +9,7 @@ pkgs.testers.runNixOSTest {
   nodes.mail = { config, pkgs, lib, ... }: {
     imports = [
       ../nixos/test-certs.nix
+      ../nixos/test-network.nix
       ../nixos/opensmtpd.nix
     ];
 
@@ -33,10 +34,17 @@ pkgs.testers.runNixOSTest {
         "alice" = "$6$060RjN4XgGU35LkE$IJC9LNaAeOwWRsW8h0AVqufnGlENfuKQqAWPSb0O3EXk6IvuixkqpkRij69/K6OJPut0LhlbuOvrKKzfStN.Q.";
         "bob" = "$6$060RjN4XgGU35LkE$IJC9LNaAeOwWRsW8h0AVqufnGlENfuKQqAWPSb0O3EXk6IvuixkqpkRij69/K6OJPut0LhlbuOvrKKzfStN.Q.";
       };
+
+      # Use test network
+      networking.networks = [ "test-net" ];
+      networking.publishPorts = [ "25:25" "587:587" ];
     };
 
-    # Ensure generate-test-certs runs before container
-    systemd.services.podman-opensmtpd.after = [ "generate-test-certs.service" ];
+    # Enable test network (creates bridge network for containers)
+    services.testNetwork.enable = true;
+
+    # Ensure certs and network are ready before container
+    systemd.services.podman-opensmtpd.after = [ "generate-test-certs.service" "create-test-network.service" ];
 
     # Use tmpfs for /data
     fileSystems."/data" = {

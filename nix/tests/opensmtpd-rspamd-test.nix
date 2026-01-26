@@ -22,6 +22,7 @@ pkgs.testers.runNixOSTest {
   nodes.mail = { config, pkgs, lib, ... }: {
     imports = [
       ../nixos/test-certs.nix
+      ../nixos/test-network.nix
       ../nixos/opensmtpd.nix
       ../nixos/rspamd.nix
     ];
@@ -72,6 +73,12 @@ pkgs.testers.runNixOSTest {
           /SPAM-TEST-PATTERN-ADD-HEADER/i
         '';
       };
+
+      # Use isolated network
+      networking.networks = [ "test-net" ];
+      networking.publishPorts = [ "11332:11332" "11333:11333" ];
+      redisNetworking.networks = [ "test-net" ];
+      redisNetworking.publishPorts = [ "6379:6379" ];
     };
 
     # === OpenSMTPd Configuration ===
@@ -88,7 +95,14 @@ pkgs.testers.runNixOSTest {
         "alice" = "$6$060RjN4XgGU35LkE$IJC9LNaAeOwWRsW8h0AVqufnGlENfuKQqAWPSb0O3EXk6IvuixkqpkRij69/K6OJPut0LhlbuOvrKKzfStN.Q.";
         "bob" = "$6$060RjN4XgGU35LkE$IJC9LNaAeOwWRsW8h0AVqufnGlENfuKQqAWPSb0O3EXk6IvuixkqpkRij69/K6OJPut0LhlbuOvrKKzfStN.Q.";
       };
+
+      # Use isolated network
+      networking.networks = [ "test-net" ];
+      networking.publishPorts = [ "25:25" "587:587" ];
     };
+
+    # Enable test network
+    services.testNetwork.enable = true;
 
     # Install DKIM test key
     systemd.services.setup-dkim-key = {
@@ -108,15 +122,18 @@ pkgs.testers.runNixOSTest {
       '';
     };
 
-    # Service ordering - add setup-dkim-key to rspamd's dependencies
+    # Service ordering - network + dkim setup before containers
+    systemd.services.podman-rspamd-redis.after = [ "create-test-network.service" ];
     systemd.services.podman-rspamd.after = lib.mkForce [
       "network-online.target"
       "podman-rspamd-redis.service"
       "setup-dkim-key.service"
+      "create-test-network.service"
     ];
     systemd.services.podman-opensmtpd.after = [
       "generate-test-certs.service"
       "podman-rspamd.service"
+      "create-test-network.service"
     ];
 
     # Use tmpfs for /data

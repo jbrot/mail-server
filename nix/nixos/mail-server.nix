@@ -16,6 +16,7 @@ in
     ./opensmtpd.nix
     ./dovecot.nix
     ./rspamd.nix
+    ./test-network.nix
   ];
 
   options.services.mailServer = {
@@ -103,6 +104,9 @@ in
   };
 
   config = lib.mkIf cfg.enable {
+    # Enable test network for container communication
+    services.testNetwork.enable = true;
+
     # === Rspamd Configuration ===
     services.rspamdContainer = {
       enable = true;
@@ -123,6 +127,10 @@ in
           hamThreshold = -0.5;
         };
       };
+
+      # Network configuration (shared test-net)
+      networking.networks = [ "test-net" ];
+      redisNetworking.networks = [ "test-net" ];
     };
 
     # === Dovecot Configuration ===
@@ -134,7 +142,14 @@ in
       enableLmtp = true;
 
       # Enable rspamd integration for spam/ham learning via imap_sieve
-      rspamd.enable = true;
+      rspamd = {
+        enable = true;
+        host = "rspamd:11334";
+      };
+
+      # Network configuration (shared test-net)
+      networking.networks = [ "test-net" ];
+      networking.publishPorts = [ "993:993" "143:143" ];
     };
 
     # === OpenSMTPd Configuration ===
@@ -154,13 +169,24 @@ in
 
       # Enable rspamd filter
       enableRspamd = true;
+
+      # Network configuration (shared test-net)
+      networking.networks = [ "test-net" ];
+      networking.publishPorts = [ "25:25" "587:587" ];
     };
 
     # === Service Ordering ===
     # Redis starts first, then rspamd, then dovecot, then opensmtpd
-    systemd.services.podman-rspamd.after = [ "podman-rspamd-redis.service" ];
-    systemd.services.podman-dovecot.after = [ "podman-rspamd.service" ];
-    systemd.services.podman-opensmtpd.after = [ "podman-dovecot.service" "podman-rspamd.service" ];
+    # All containers depend on network setup
+    # When ECR is enabled, all containers depend on ecr-login
+    systemd.services.podman-rspamd-redis = {
+      after = [ "create-test-network.service" ]
+        ++ lib.optionals cfg.useEcr [ "ecr-login.service" ];
+      requires = lib.optionals cfg.useEcr [ "ecr-login.service" ];
+    };
+    systemd.services.podman-rspamd.after = [ "podman-rspamd-redis.service" "create-test-network.service" ];
+    systemd.services.podman-dovecot.after = [ "podman-rspamd.service" "create-test-network.service" ];
+    systemd.services.podman-opensmtpd.after = [ "podman-dovecot.service" "podman-rspamd.service" "create-test-network.service" ];
 
     # === ECR Login (for production) ===
     systemd.services.ecr-login = lib.mkIf cfg.useEcr {
@@ -187,12 +213,6 @@ in
         OnUnitActiveSec = "6h";
         RandomizedDelaySec = "5m";
       };
-    };
-
-    # Add ECR dependency to container services
-    systemd.services.podman-rspamd-redis = lib.mkIf cfg.useEcr {
-      after = [ "ecr-login.service" ];
-      requires = [ "ecr-login.service" ];
     };
 
     # === Data Directories ===

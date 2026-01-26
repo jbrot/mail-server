@@ -36,6 +36,13 @@ let
 
     # Enable write access (for learning spam/ham)
     enable_password = "${cfg.controller.enablePassword}";
+
+    # Allow passwordless access from trusted networks (localhost and container networks)
+    secure_ip = "127.0.0.1";
+    secure_ip = "::1";
+    secure_ip = "10.0.0.0/8";
+    secure_ip = "172.16.0.0/12";
+    secure_ip = "192.168.0.0/16";
   '';
 
   # Generate actions.conf
@@ -77,7 +84,7 @@ let
 
     # Use Redis backend for Bayes data
     backend = "redis";
-    servers = "127.0.0.1:${toString cfg.redisPort}";
+    servers = "${cfg.redisHost}:${toString cfg.redisPort}";
     new_schema = true;
 
     # Auto-learn from high-confidence results
@@ -93,7 +100,7 @@ let
   # Generate redis.conf for rspamd global Redis settings
   redisConf = pkgs.writeText "redis.conf" ''
     # Redis configuration for rspamd
-    servers = "127.0.0.1:${toString cfg.redisPort}";
+    servers = "${cfg.redisHost}:${toString cfg.redisPort}";
   '';
 
   # Generate options.inc
@@ -134,6 +141,38 @@ in
       type = lib.types.int;
       default = 6379;
       description = "Port for Redis server";
+    };
+
+    redisHost = lib.mkOption {
+      type = lib.types.str;
+      default = "redis";
+      description = "Hostname for Redis server (container name on shared network)";
+    };
+
+    # Network configuration for rspamd container
+    networking.networks = lib.mkOption {
+      type = lib.types.listOf lib.types.str;
+      default = [];
+      description = "List of podman networks to attach";
+    };
+
+    networking.publishPorts = lib.mkOption {
+      type = lib.types.listOf lib.types.str;
+      default = [];
+      description = "Ports to publish (e.g., '11333:11333')";
+    };
+
+    # Network configuration for redis container
+    redisNetworking.networks = lib.mkOption {
+      type = lib.types.listOf lib.types.str;
+      default = [];
+      description = "List of podman networks to attach";
+    };
+
+    redisNetworking.publishPorts = lib.mkOption {
+      type = lib.types.listOf lib.types.str;
+      default = [];
+      description = "Ports to publish (e.g., '6379:6379')";
     };
 
     # Resource limits for rspamd container
@@ -330,17 +369,20 @@ in
       image = cfg.redisImage;
       autoStart = true;
 
-      # Use host network for simplicity
-      extraOptions = [
-        "--network=host"
-        # Run as redis user (UID 4000)
-        "--user=4000:4000"
-        # Resource limits
-        "--memory=${toString cfg.redisResources.memory}m"
-        "--memory-reservation=${toString cfg.redisResources.memoryReservation}m"
-        "--cpus=${toString cfg.redisResources.cpus}"
-        "--pids-limit=${toString cfg.redisResources.pidsLimit}"
-      ];
+      extraOptions =
+        # Network configuration
+        (map (net: "--network=${net}") cfg.redisNetworking.networks)
+        ++ [ "--hostname=redis" ]
+        ++ (map (p: "-p=${p}") cfg.redisNetworking.publishPorts)
+        ++ [
+          # Run as redis user (UID 4000)
+          "--user=4000:4000"
+          # Resource limits
+          "--memory=${toString cfg.redisResources.memory}m"
+          "--memory-reservation=${toString cfg.redisResources.memoryReservation}m"
+          "--cpus=${toString cfg.redisResources.cpus}"
+          "--pids-limit=${toString cfg.redisResources.pidsLimit}"
+        ];
 
       # Volume mounts
       volumes = [
@@ -361,17 +403,20 @@ in
       image = cfg.image;
       autoStart = true;
 
-      # Use host network for simplicity
       # Note: rspamd starts as root and drops privileges to rspamd user internally
-      extraOptions = [
-        "--network=host"
-        "--cap-add=NET_BIND_SERVICE"
-        # Resource limits
-        "--memory=${toString cfg.resources.memory}m"
-        "--memory-reservation=${toString cfg.resources.memoryReservation}m"
-        "--cpus=${toString cfg.resources.cpus}"
-        "--pids-limit=${toString cfg.resources.pidsLimit}"
-      ];
+      extraOptions =
+        # Network configuration
+        (map (net: "--network=${net}") cfg.networking.networks)
+        ++ [ "--hostname=rspamd" ]
+        ++ (map (p: "-p=${p}") cfg.networking.publishPorts)
+        ++ [
+          "--cap-add=NET_BIND_SERVICE"
+          # Resource limits
+          "--memory=${toString cfg.resources.memory}m"
+          "--memory-reservation=${toString cfg.resources.memoryReservation}m"
+          "--cpus=${toString cfg.resources.cpus}"
+          "--pids-limit=${toString cfg.resources.pidsLimit}"
+        ];
 
       # Volume mounts
       volumes = [
@@ -397,7 +442,8 @@ in
         ProtectHome = true;
         PrivateTmp = true;
         NoNewPrivileges = true;
-        ProtectKernelTunables = true;
+        # ProtectKernelTunables disabled - podman/netavark needs to modify /proc/sys for networking
+ProtectKernelTunables = false;
         ProtectKernelModules = true;
         # ProtectControlGroups omitted - podman needs to create cgroups for containers
         RestrictSUIDSGID = true;
@@ -418,7 +464,8 @@ in
         ProtectHome = true;
         PrivateTmp = true;
         NoNewPrivileges = true;
-        ProtectKernelTunables = true;
+        # ProtectKernelTunables disabled - podman/netavark needs to modify /proc/sys for networking
+ProtectKernelTunables = false;
         ProtectKernelModules = true;
         # ProtectControlGroups omitted - podman needs to create cgroups for containers
         RestrictSUIDSGID = true;

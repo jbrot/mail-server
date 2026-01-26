@@ -44,6 +44,7 @@ pkgs.testers.runNixOSTest {
 
   nodes.rspamd = { config, pkgs, lib, ... }: {
     imports = [
+      ../nixos/test-network.nix
       ../nixos/rspamd.nix
     ];
 
@@ -82,7 +83,20 @@ pkgs.testers.runNixOSTest {
 
       # Use debug logging for tests
       logLevel = "debug";
+
+      # Use isolated network (both rspamd and redis on same network)
+      networking.networks = [ "test-net" ];
+      networking.publishPorts = [ "11332:11332" "11333:11333" "11334:11334" ];
+      redisNetworking.networks = [ "test-net" ];
+      redisNetworking.publishPorts = [ "6379:6379" ];
     };
+
+    # Enable test network
+    services.testNetwork.enable = true;
+
+    # Ensure network is ready before containers
+    systemd.services.podman-rspamd-redis.after = [ "create-test-network.service" ];
+    systemd.services.podman-rspamd.after = [ "create-test-network.service" ];
 
     # Use tmpfs for /data
     fileSystems."/data" = {
@@ -178,7 +192,7 @@ pkgs.testers.runNixOSTest {
     with subtest("Redis configuration applied"):
         result = rspamd.succeed("cat /etc/rspamd/local.d/redis.conf")
         assert "servers" in result, f"Redis servers not configured: {result}"
-        assert "127.0.0.1:6379" in result, f"Redis server address not found: {result}"
+        assert "redis:6379" in result, f"Redis server address not found: {result}"
 
     with subtest("Custom configuration applied - logging.inc"):
         result = rspamd.succeed("cat /etc/rspamd/local.d/logging.inc")

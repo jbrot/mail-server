@@ -290,8 +290,23 @@ in
 
       host = lib.mkOption {
         type = lib.types.str;
-        default = "127.0.0.1:11334";
-        description = "Rspamd controller host:port for rspamc learn commands";
+        default = "rspamd:11334";
+        description = "Rspamd controller host:port for rspamc learn commands (container name on shared network)";
+      };
+    };
+
+    # Network configuration
+    networking = {
+      networks = lib.mkOption {
+        type = lib.types.listOf lib.types.str;
+        default = [];
+        description = "List of podman networks to attach";
+      };
+
+      publishPorts = lib.mkOption {
+        type = lib.types.listOf lib.types.str;
+        default = [ "143:143" "993:993" ];
+        description = "Ports to publish to host";
       };
     };
 
@@ -330,19 +345,22 @@ in
       image = cfg.image;
       autoStart = true;
 
-      # Use host network
-      extraOptions = [
-        "--network=host"
-        "--cap-add=NET_BIND_SERVICE"
-        "--cap-add=SETUID"
-        "--cap-add=SETGID"
-        # CHOWN removed - host pre-creates directories with correct ownership
-        # Resource limits
-        "--memory=${toString cfg.resources.memory}m"
-        "--memory-reservation=${toString cfg.resources.memoryReservation}m"
-        "--cpus=${toString cfg.resources.cpus}"
-        "--pids-limit=${toString cfg.resources.pidsLimit}"
-      ];
+      extraOptions =
+        # Network configuration
+        (map (net: "--network=${net}") cfg.networking.networks)
+        ++ [ "--hostname=dovecot" ]
+        ++ (map (p: "-p=${p}") cfg.networking.publishPorts)
+        ++ [
+          "--cap-add=NET_BIND_SERVICE"
+          "--cap-add=SETUID"
+          "--cap-add=SETGID"
+          # CHOWN removed - host pre-creates directories with correct ownership
+          # Resource limits
+          "--memory=${toString cfg.resources.memory}m"
+          "--memory-reservation=${toString cfg.resources.memoryReservation}m"
+          "--cpus=${toString cfg.resources.cpus}"
+          "--pids-limit=${toString cfg.resources.pidsLimit}"
+        ];
 
       # Volume mounts - mount individual config files to preserve container's modules
       volumes = [
@@ -371,7 +389,8 @@ in
         ProtectHome = true;
         PrivateTmp = true;
         NoNewPrivileges = true;
-        ProtectKernelTunables = true;
+        # ProtectKernelTunables disabled - podman/netavark needs to modify /proc/sys for networking
+ProtectKernelTunables = false;
         ProtectKernelModules = true;
         # ProtectControlGroups omitted - podman needs to create cgroups for containers
         RestrictSUIDSGID = true;

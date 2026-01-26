@@ -9,6 +9,7 @@ pkgs.testers.runNixOSTest {
   nodes.mail = { config, pkgs, lib, ... }: {
     imports = [
       ../nixos/test-certs.nix
+      ../nixos/test-network.nix
       ../nixos/opensmtpd.nix
       ../nixos/dovecot.nix
     ];
@@ -34,6 +35,9 @@ pkgs.testers.runNixOSTest {
         "alice" = "$6$060RjN4XgGU35LkE$IJC9LNaAeOwWRsW8h0AVqufnGlENfuKQqAWPSb0O3EXk6IvuixkqpkRij69/K6OJPut0LhlbuOvrKKzfStN.Q.";
         "bob" = "$6$060RjN4XgGU35LkE$IJC9LNaAeOwWRsW8h0AVqufnGlENfuKQqAWPSb0O3EXk6IvuixkqpkRij69/K6OJPut0LhlbuOvrKKzfStN.Q.";
       };
+      # Use isolated network
+      networking.networks = [ "test-net" ];
+      networking.publishPorts = [ "25:25" "587:587" ];
     };
 
     # === Dovecot Configuration ===
@@ -49,11 +53,18 @@ pkgs.testers.runNixOSTest {
 
       enableLmtp = true;
       lmtpPort = 24;
+
+      # Use isolated network
+      networking.networks = [ "test-net" ];
+      networking.publishPorts = [ "993:993" "143:143" "24:24" ];
     };
 
-    # Service ordering: certs -> dovecot -> opensmtpd
-    systemd.services.podman-dovecot.after = [ "generate-test-certs.service" ];
-    systemd.services.podman-opensmtpd.after = [ "generate-test-certs.service" "podman-dovecot.service" ];
+    # Enable test network
+    services.testNetwork.enable = true;
+
+    # Service ordering: certs + network -> dovecot -> opensmtpd
+    systemd.services.podman-dovecot.after = [ "generate-test-certs.service" "create-test-network.service" ];
+    systemd.services.podman-opensmtpd.after = [ "generate-test-certs.service" "create-test-network.service" "podman-dovecot.service" ];
 
     # Use tmpfs for /data
     fileSystems."/data" = {

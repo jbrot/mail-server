@@ -33,7 +33,7 @@ let
         disconnect "550 no FCrDNS is so 80s"
 
     ${lib.optionalString cfg.enableRspamd ''
-    filter rspamd proc-exec "${pkgs.opensmtpd-filter-rspamd}/bin/filter-rspamd"
+    filter rspamd proc-exec "${pkgs.opensmtpd-filter-rspamd}/bin/filter-rspamd -url http://${cfg.rspamdHost}:11333"
     ''}
 
     # Listen on all interfaces
@@ -47,7 +47,7 @@ let
     ${if cfg.localDelivery then ''
     action "local_mail" maildir "/data/mail/%{dest.user}" junk userbase <users> alias <aliases>
     '' else ''
-    action "local_mail" lmtp localhost:${toString cfg.lmtpPort} userbase <users> alias <aliases>
+    action "local_mail" lmtp ${cfg.lmtpHost}:${toString cfg.lmtpPort} userbase <users> alias <aliases>
     ''}
     action "outbound" relay helo ${cfg.serverDomain}
 
@@ -127,6 +127,33 @@ in
       description = "GID for virtual mail group";
     };
 
+    # Network configuration
+    networking = {
+      networks = lib.mkOption {
+        type = lib.types.listOf lib.types.str;
+        default = [];
+        description = "List of podman networks to attach";
+      };
+
+      publishPorts = lib.mkOption {
+        type = lib.types.listOf lib.types.str;
+        default = [ "25:25" "587:587" ];
+        description = "Ports to publish to host";
+      };
+    };
+
+    rspamdHost = lib.mkOption {
+      type = lib.types.str;
+      default = "rspamd";
+      description = "Hostname for rspamd milter connection (container name on shared network)";
+    };
+
+    lmtpHost = lib.mkOption {
+      type = lib.types.str;
+      default = "dovecot";
+      description = "Hostname for LMTP delivery to Dovecot (container name on shared network)";
+    };
+
     # Resource limits
     resources = {
       memory = lib.mkOption {
@@ -161,20 +188,23 @@ in
       image = cfg.image;
       autoStart = true;
 
-      # Use host network
-      extraOptions = [
-        "--network=host"
-        "--cap-add=NET_BIND_SERVICE"
-        # Resource limits
-        "--memory=${toString cfg.resources.memory}m"
-        "--memory-reservation=${toString cfg.resources.memoryReservation}m"
-        "--cpus=${toString cfg.resources.cpus}"
-        "--pids-limit=${toString cfg.resources.pidsLimit}"
-      ] ++ lib.optionals cfg.localDelivery [
-        # SETUID/SETGID only needed for local maildir delivery, not LMTP
-        "--cap-add=SETUID"
-        "--cap-add=SETGID"
-      ];
+      extraOptions =
+        # Network configuration
+        (map (net: "--network=${net}") cfg.networking.networks)
+        ++ [ "--hostname=opensmtpd" ]
+        ++ (map (p: "-p=${p}") cfg.networking.publishPorts)
+        ++ [
+          "--cap-add=NET_BIND_SERVICE"
+          # Resource limits
+          "--memory=${toString cfg.resources.memory}m"
+          "--memory-reservation=${toString cfg.resources.memoryReservation}m"
+          "--cpus=${toString cfg.resources.cpus}"
+          "--pids-limit=${toString cfg.resources.pidsLimit}"
+        ] ++ lib.optionals cfg.localDelivery [
+          # SETUID/SETGID only needed for local maildir delivery, not LMTP
+          "--cap-add=SETUID"
+          "--cap-add=SETGID"
+        ];
 
       # Volume mounts
       # Note: /data/mail is only needed for local delivery, not LMTP (Dovecot handles storage)
@@ -206,7 +236,8 @@ in
         ProtectHome = true;
         PrivateTmp = true;
         NoNewPrivileges = true;
-        ProtectKernelTunables = true;
+        # ProtectKernelTunables disabled - podman/netavark needs to modify /proc/sys for networking
+ProtectKernelTunables = false;
         ProtectKernelModules = true;
         # ProtectControlGroups omitted - podman needs to create cgroups for containers
         RestrictSUIDSGID = true;
