@@ -60,6 +60,10 @@
 
           # AWS CLI from pinned nixpkgs (for deploy.sh)
           awscli = pkgs.awscli2;
+
+          # OpenSSL and dig for e2e tests in deploy.sh
+          openssl = pkgs.openssl;
+          dig = pkgs.dnsutils;
         } // (if system == mailServerConfig.architecture then {
           # Custom NixOS AMI for EC2 deployment
           # Architecture determined by config (x86_64-linux or aarch64-linux)
