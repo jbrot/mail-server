@@ -3,7 +3,7 @@
 # Usage: ./scripts/deploy.sh [OPTIONS]
 #
 # Phases:
-#   tests  - Run tests (nix flake check)
+#   test  - Run tests (nix flake check)
 #   infra  - Deploy infrastructure (terraform apply)
 #   deploy - Deploy NixOS configuration (nixos-rebuild switch --target-host)
 
@@ -139,7 +139,7 @@ Options:
     --list-configs             List available configurations
 
 Phases:
-    tests   Run nix flake check
+    test   Run nix flake check
     infra   Generate tfvars from Nix config, run terraform apply
     deploy  Run nixos-rebuild switch --target-host
     e2e     Validate DNS, ACME certs, and TLS on deployed server
@@ -152,7 +152,7 @@ Examples:
     ./scripts/deploy.sh -c production
 
     # Run tests only
-    ./scripts/deploy.sh -o tests
+    ./scripts/deploy.sh -o test
 
     # Deploy config only (no infra changes)
     ./scripts/deploy.sh -c production -o deploy
@@ -169,10 +169,10 @@ EOF
 validate_phase() {
     local phase="$1"
     case "$phase" in
-        tests|infra|deploy|e2e) return 0 ;;
+        test|infra|deploy|e2e) return 0 ;;
         *)
             log_error "Invalid phase: $phase"
-            log_error "Valid phases are: tests, infra, deploy, e2e"
+            log_error "Valid phases are: test, infra, deploy, e2e"
             exit 1
             ;;
     esac
@@ -314,10 +314,10 @@ if is_default_config && { should_run_phase "infra" || should_run_phase "deploy";
 fi
 
 # ============================================================================
-# Phase: tests
+# Phase: test
 # ============================================================================
-phase_tests() {
-    log_step "Phase: tests"
+phase_test() {
+    log_step "Phase: test"
 
     log_verbose "Command: nix flake check $NIX_VERBOSE $OVERRIDE_ARG"
 
@@ -640,11 +640,11 @@ echo "  Region:   $AWS_REGION"
 echo "=========================================="
 echo ""
 
-# Phase: tests
-if should_run_phase "tests"; then
-    phase_tests
+# Phase: test
+if should_run_phase "test"; then
+    phase_test
 else
-    log_info "Skipping tests phase"
+    log_info "Skipping test phase"
 fi
 
 # Phase: infra
