@@ -15,4 +15,4 @@ aws_region       = "us-east-1"       # aws.region
 instance_type    = "t3.small"        # aws.instanceType
 data_volume_size = 50                # aws.dataVolumeSize
 key_name         = "your-ssh-key"    # aws.keyName
-architecture     = "x86_64"          # derived from architecture
+architecture     = "x86_64-linux"    # architecture (passed through from Nix)

@@ -45,7 +45,7 @@ data "aws_ami" "nixos" {
 
   filter {
     name   = "name"
-    values = ["nixos/${var.nixos_version}*-${local.nixos_arch}-linux"]
+    values = ["nixos/${var.nixos_version}*-${var.architecture}"]
   }
 
   filter {
@@ -62,8 +62,6 @@ data "http" "my_ip" {
 
 locals {
   admin_cidr = var.admin_cidr == "auto" ? "${chomp(data.http.my_ip[0].response_body)}/32" : var.admin_cidr
-  # Convert AWS architecture to NixOS AMI architecture naming
-  nixos_arch = var.architecture == "arm64" ? "aarch64" : var.architecture
 }
 
 # Security Group for mail server

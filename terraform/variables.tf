@@ -17,13 +17,13 @@ variable "instance_type" {
 }
 
 variable "architecture" {
-  description = "CPU architecture (x86_64 or arm64)"
+  description = "CPU architecture (x86_64-linux or aarch64-linux)"
   type        = string
-  default     = "x86_64"
+  default     = "x86_64-linux"
 
   validation {
-    condition     = contains(["x86_64", "arm64"], var.architecture)
-    error_message = "Architecture must be either x86_64 or arm64."
+    condition     = contains(["x86_64-linux", "aarch64-linux"], var.architecture)
+    error_message = "Architecture must be either x86_64-linux or aarch64-linux."
   }
 }
 
