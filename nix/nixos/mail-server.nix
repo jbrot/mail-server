@@ -50,22 +50,22 @@ in
     images = {
       opensmtpd = lib.mkOption {
         type = lib.types.str;
-        default = "docker-archive:${self.packages.${pkgs.system}.opensmtpd-image}";
+        default = "docker-archive:${self.packages.${pkgs.stdenv.hostPlatform.system}.opensmtpd-image}";
         description = "OpenSMTPd container image";
       };
       dovecot = lib.mkOption {
         type = lib.types.str;
-        default = "docker-archive:${self.packages.${pkgs.system}.dovecot-image}";
+        default = "docker-archive:${self.packages.${pkgs.stdenv.hostPlatform.system}.dovecot-image}";
         description = "Dovecot container image";
       };
       rspamd = lib.mkOption {
         type = lib.types.str;
-        default = "docker-archive:${self.packages.${pkgs.system}.rspamd-image}";
+        default = "docker-archive:${self.packages.${pkgs.stdenv.hostPlatform.system}.rspamd-image}";
         description = "Rspamd container image";
       };
       redis = lib.mkOption {
         type = lib.types.str;
-        default = "docker-archive:${self.packages.${pkgs.system}.redis-image}";
+        default = "docker-archive:${self.packages.${pkgs.stdenv.hostPlatform.system}.redis-image}";
         description = "Redis container image";
       };
     };

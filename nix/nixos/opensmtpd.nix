@@ -194,7 +194,13 @@ in
     };
   };
 
-  config = lib.mkIf cfg.enable {
+  config = lib.mkIf cfg.enable (let
+    # Capabilities needed by the container
+    # - NET_BIND_SERVICE: bind to ports < 1024 (25, 587)
+    # - SETUID/SETGID: only needed for local maildir delivery (not LMTP)
+    capabilities = [ "NET_BIND_SERVICE" ]
+      ++ lib.optionals cfg.localDelivery [ "SETUID" "SETGID" ];
+  in {
     # OpenSMTPd container
     virtualisation.oci-containers.containers.opensmtpd = {
       image = cfg.image;
@@ -205,17 +211,14 @@ in
         (map (net: "--network=${net}") cfg.networking.networks)
         ++ [ "--hostname=opensmtpd" ]
         ++ (map (p: "-p=${p}") cfg.networking.publishPorts)
+        # Capabilities
+        ++ (map (cap: "--cap-add=${cap}") capabilities)
         ++ [
-          "--cap-add=NET_BIND_SERVICE"
           # Resource limits
           "--memory=${toString cfg.resources.memory}m"
           "--memory-reservation=${toString cfg.resources.memoryReservation}m"
           "--cpus=${toString cfg.resources.cpus}"
           "--pids-limit=${toString cfg.resources.pidsLimit}"
-        ] ++ lib.optionals cfg.localDelivery [
-          # SETUID/SETGID only needed for local maildir delivery, not LMTP
-          "--cap-add=SETUID"
-          "--cap-add=SETGID"
         ];
 
       # Volume mounts
@@ -245,11 +248,12 @@ in
 
         # Systemd hardening
         # Note: ProtectSystem omitted - podman needs write access to /var/lib/containers and /etc/containers
+        # Note: NoNewPrivileges omitted - podman needs to write /proc/*/uid_map for user namespaces
+        # Note: CapabilityBoundingSet omitted - podman needs many capabilities; container caps are managed by podman itself
         ProtectHome = true;
         PrivateTmp = true;
-        NoNewPrivileges = true;
         # ProtectKernelTunables disabled - podman/netavark needs to modify /proc/sys for networking
-ProtectKernelTunables = false;
+        ProtectKernelTunables = false;
         ProtectKernelModules = true;
         # ProtectControlGroups omitted - podman needs to create cgroups for containers
         RestrictSUIDSGID = true;
@@ -298,5 +302,5 @@ ProtectKernelTunables = false;
         mode = "0640";
       };
     };
-  };
+  });
 }

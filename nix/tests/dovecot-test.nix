@@ -23,7 +23,7 @@ pkgs.testers.runNixOSTest {
     # === Dovecot Configuration ===
     services.dovecotContainer = {
       enable = true;
-      image = "docker-archive:${self.packages.${pkgs.system}.dovecot-image}";
+      image = "docker-archive:${self.packages.${pkgs.stdenv.hostPlatform.system}.dovecot-image}";
 
       # Test users (SHA-512 hash of "testpass" for both)
       users = {
@@ -61,6 +61,7 @@ pkgs.testers.runNixOSTest {
     virtualisation = {
       memorySize = 1024;
       cores = 2;
+      diskSize = 4096;  # Larger disk for container images
       podman.enable = true;
     };
   };

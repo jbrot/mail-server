@@ -37,8 +37,8 @@ pkgs.testers.runNixOSTest {
     # === Rspamd Configuration ===
     services.rspamdContainer = {
       enable = true;
-      image = "docker-archive:${self.packages.${pkgs.system}.rspamd-image}";
-      redis.image = "docker-archive:${self.packages.${pkgs.system}.redis-image}";
+      image = "docker-archive:${self.packages.${pkgs.stdenv.hostPlatform.system}.rspamd-image}";
+      redis.image = "docker-archive:${self.packages.${pkgs.stdenv.hostPlatform.system}.redis-image}";
 
       # Action thresholds for testing
       actions = {
@@ -84,7 +84,7 @@ pkgs.testers.runNixOSTest {
     # === OpenSMTPd Configuration ===
     services.opensmtpdContainer = {
       enable = true;
-      image = "docker-archive:${self.packages.${pkgs.system}.opensmtpd-image}";
+      image = "docker-archive:${self.packages.${pkgs.stdenv.hostPlatform.system}.opensmtpd-image}";
       serverDomain = "localhost";
       emailDomain = "test.local";
       localDelivery = true;  # Use maildir with junk support
@@ -156,6 +156,7 @@ pkgs.testers.runNixOSTest {
     virtualisation = {
       memorySize = 2048;
       cores = 2;
+      diskSize = 4096;  # Larger disk for container images
       podman.enable = true;
     };
   };

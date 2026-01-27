@@ -5,7 +5,6 @@
 let
   # OpenSMTPd package
   opensmtpd = pkgs.opensmtpd;
-  opensmtpd-extras = pkgs.opensmtpd-extras;
 
   # Create a minimal passwd file for the mail user
   # UID 2000 for smtpd (unique per service for isolation)
@@ -47,7 +46,6 @@ pkgs.dockerTools.buildLayeredImage {
 
   contents = [
     opensmtpd
-    opensmtpd-extras
     pkgs.opensmtpd-filter-rspamd
     entrypoint
     pkgs.coreutils

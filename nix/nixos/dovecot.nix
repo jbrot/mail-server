@@ -114,6 +114,9 @@ let
     # Protocols to enable
     protocols = imap ${lib.optionalString cfg.enableLmtp "lmtp"}
 
+    # Plugin directory (container has symlinks to both dovecot and pigeonhole modules)
+    mail_plugin_dir = /etc/dovecot/modules
+
     # Mail location
     mail_location = ${cfg.mailLocation}
 
@@ -339,7 +342,12 @@ in
 
   };
 
-  config = lib.mkIf cfg.enable {
+  config = lib.mkIf cfg.enable (let
+    # Capabilities needed by the container
+    # - NET_BIND_SERVICE: bind to ports < 1024 (143, 993)
+    # - SETUID/SETGID: dovecot privilege separation
+    capabilities = [ "NET_BIND_SERVICE" "SETUID" "SETGID" ];
+  in {
     # Dovecot container
     virtualisation.oci-containers.containers.dovecot = {
       image = cfg.image;
@@ -350,11 +358,9 @@ in
         (map (net: "--network=${net}") cfg.networking.networks)
         ++ [ "--hostname=dovecot" ]
         ++ (map (p: "-p=${p}") cfg.networking.publishPorts)
+        # Capabilities
+        ++ (map (cap: "--cap-add=${cap}") capabilities)
         ++ [
-          "--cap-add=NET_BIND_SERVICE"
-          "--cap-add=SETUID"
-          "--cap-add=SETGID"
-          # CHOWN removed - host pre-creates directories with correct ownership
           # Resource limits
           "--memory=${toString cfg.resources.memory}m"
           "--memory-reservation=${toString cfg.resources.memoryReservation}m"
@@ -386,11 +392,12 @@ in
 
         # Systemd hardening
         # Note: ProtectSystem omitted - podman needs write access to /var/lib/containers and /etc/containers
+        # Note: NoNewPrivileges omitted - podman needs to write /proc/*/uid_map for user namespaces
+        # Note: CapabilityBoundingSet omitted - podman needs CAP_SETUID/CAP_SETGID for user namespaces
         ProtectHome = true;
         PrivateTmp = true;
-        NoNewPrivileges = true;
         # ProtectKernelTunables disabled - podman/netavark needs to modify /proc/sys for networking
-ProtectKernelTunables = false;
+        ProtectKernelTunables = false;
         ProtectKernelModules = true;
         # ProtectControlGroups omitted - podman needs to create cgroups for containers
         RestrictSUIDSGID = true;
@@ -456,5 +463,5 @@ ProtectKernelTunables = false;
         mode = "0755";
       };
     };
-  };
+  });
 }

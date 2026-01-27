@@ -73,12 +73,8 @@ pkgs.dockerTools.buildLayeredImage {
 
     # Create modules directory with both dovecot and pigeonhole modules
     mkdir -p etc/dovecot/modules
-    for mod in ${dovecot}/lib/dovecot/*.so; do
-      ln -s "$mod" etc/dovecot/modules/
-    done
-    for mod in ${pigeonhole}/lib/dovecot/*.so; do
-      ln -s "$mod" etc/dovecot/modules/
-    done
+    find ${dovecot}/lib/dovecot -name '*.so' -exec ln -sf {} etc/dovecot/modules/ \;
+    find ${pigeonhole}/lib/dovecot -name '*.so' -exec ln -sf {} etc/dovecot/modules/ \;
 
     # Copy passwd and group files
     cp ${passwdFile} etc/passwd

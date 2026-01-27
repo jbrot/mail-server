@@ -25,8 +25,8 @@ pkgs.testers.runNixOSTest {
     # === Rspamd Configuration ===
     services.rspamdContainer = {
       enable = true;
-      image = "docker-archive:${self.packages.${pkgs.system}.rspamd-image}";
-      redis.image = "docker-archive:${self.packages.${pkgs.system}.redis-image}";
+      image = "docker-archive:${self.packages.${pkgs.stdenv.hostPlatform.system}.rspamd-image}";
+      redis.image = "docker-archive:${self.packages.${pkgs.stdenv.hostPlatform.system}.redis-image}";
 
       # Debug logging
       logLevel = "info";
@@ -41,7 +41,7 @@ pkgs.testers.runNixOSTest {
     # === Dovecot Configuration ===
     services.dovecotContainer = {
       enable = true;
-      image = "docker-archive:${self.packages.${pkgs.system}.dovecot-image}";
+      image = "docker-archive:${self.packages.${pkgs.stdenv.hostPlatform.system}.dovecot-image}";
 
       # Test credentials (SHA-512 hash of "testpass")
       users = {

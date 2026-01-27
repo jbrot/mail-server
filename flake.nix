@@ -2,7 +2,7 @@
   description = "Reproducible NixOS-based email server with containerized mail stack";
 
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-24.05";
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.11";
     flake-utils.url = "github:numtide/flake-utils";
 
     # Config input - override for different configs:

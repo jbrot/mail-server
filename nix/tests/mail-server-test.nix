@@ -15,10 +15,10 @@ pkgs.testers.runNixOSTest {
 
     # Explicit image paths for tests
     services.mailServer.images = {
-      opensmtpd = "docker-archive:${self.packages.${pkgs.system}.opensmtpd-image}";
-      dovecot = "docker-archive:${self.packages.${pkgs.system}.dovecot-image}";
-      rspamd = "docker-archive:${self.packages.${pkgs.system}.rspamd-image}";
-      redis = "docker-archive:${self.packages.${pkgs.system}.redis-image}";
+      opensmtpd = "docker-archive:${self.packages.${pkgs.stdenv.hostPlatform.system}.opensmtpd-image}";
+      dovecot = "docker-archive:${self.packages.${pkgs.stdenv.hostPlatform.system}.dovecot-image}";
+      rspamd = "docker-archive:${self.packages.${pkgs.stdenv.hostPlatform.system}.rspamd-image}";
+      redis = "docker-archive:${self.packages.${pkgs.stdenv.hostPlatform.system}.redis-image}";
     };
 
     # === Test Certificate Generation ===

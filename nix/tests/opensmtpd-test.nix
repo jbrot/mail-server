@@ -23,7 +23,7 @@ pkgs.testers.runNixOSTest {
     # === OpenSMTPd Configuration ===
     services.opensmtpdContainer = {
       enable = true;
-      image = "docker-archive:${self.packages.${pkgs.system}.opensmtpd-image}";
+      image = "docker-archive:${self.packages.${pkgs.stdenv.hostPlatform.system}.opensmtpd-image}";
       serverDomain = "localhost";      # PKI/HELO domain
       emailDomain = "test.local";      # Email addresses @test.local
       localDelivery = true;            # Use maildir delivery (no Dovecot needed)
@@ -66,6 +66,7 @@ pkgs.testers.runNixOSTest {
     virtualisation = {
       memorySize = 1024;
       cores = 2;
+      diskSize = 4096;  # Larger disk for container images
       podman.enable = true;
     };
 

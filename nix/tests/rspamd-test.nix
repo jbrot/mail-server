@@ -51,8 +51,8 @@ pkgs.testers.runNixOSTest {
     # === Rspamd Configuration ===
     services.rspamdContainer = {
       enable = true;
-      image = "docker-archive:${self.packages.${pkgs.system}.rspamd-image}";
-      redis.image = "docker-archive:${self.packages.${pkgs.system}.redis-image}";
+      image = "docker-archive:${self.packages.${pkgs.stdenv.hostPlatform.system}.rspamd-image}";
+      redis.image = "docker-archive:${self.packages.${pkgs.stdenv.hostPlatform.system}.redis-image}";
 
       # Use default ports
       milterPort = 11332;
@@ -126,6 +126,7 @@ pkgs.testers.runNixOSTest {
     virtualisation = {
       memorySize = 1024;
       cores = 2;
+      diskSize = 4096;  # Larger disk for container images
       podman.enable = true;
     };
   };

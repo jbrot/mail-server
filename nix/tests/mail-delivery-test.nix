@@ -24,7 +24,7 @@ pkgs.testers.runNixOSTest {
     # === OpenSMTPd Configuration ===
     services.opensmtpdContainer = {
       enable = true;
-      image = "docker-archive:${self.packages.${pkgs.system}.opensmtpd-image}";
+      image = "docker-archive:${self.packages.${pkgs.stdenv.hostPlatform.system}.opensmtpd-image}";
       serverDomain = "localhost";      # PKI/HELO domain
       emailDomain = "test.local";      # Email addresses @test.local
       localDelivery = false;           # Use LMTP to Dovecot
@@ -43,7 +43,7 @@ pkgs.testers.runNixOSTest {
     # === Dovecot Configuration ===
     services.dovecotContainer = {
       enable = true;
-      image = "docker-archive:${self.packages.${pkgs.system}.dovecot-image}";
+      image = "docker-archive:${self.packages.${pkgs.stdenv.hostPlatform.system}.dovecot-image}";
 
       # Same test users as OpenSMTPd (simple usernames)
       users = {
@@ -86,6 +86,7 @@ pkgs.testers.runNixOSTest {
     virtualisation = {
       memorySize = 1536;  # More memory for two containers
       cores = 2;
+      diskSize = 4096;  # Larger disk for container images
       podman.enable = true;
     };
   };
