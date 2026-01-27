@@ -17,6 +17,12 @@ let
     architecture     = "${mailServerConfig.architecture}"
     admin_cidr       = "${mailServerConfig.aws.adminCidr}"
     nixos_version    = "${nixosVersion}"
+
+    # DNS settings
+    domain             = "${mailServerConfig.domain}"
+    hostname           = "${mailServerConfig.hostname}"
+    route53_zone_id    = "${mailServerConfig.aws.route53ZoneId or ""}"
+    route53_create_mx  = ${if (mailServerConfig.aws.route53CreateMX or false) then "true" else "false"}
   '';
 in
 pkgs.writeText "from-nix.tfvars" tfvarsContent

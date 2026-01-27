@@ -49,3 +49,25 @@ variable "admin_cidr" {
   type        = string
   default     = "auto"
 }
+
+variable "domain" {
+  description = "Primary email domain (e.g., example.com)"
+  type        = string
+}
+
+variable "hostname" {
+  description = "Mail server hostname (e.g., mail.example.com)"
+  type        = string
+}
+
+variable "route53_zone_id" {
+  description = "Existing Route53 hosted zone ID (empty to create new zone)"
+  type        = string
+  default     = ""
+}
+
+variable "route53_create_mx" {
+  description = "Whether to create MX record (set false during migration)"
+  type        = bool
+  default     = false
+}

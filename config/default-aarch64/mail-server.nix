@@ -7,7 +7,24 @@
   # Mail domain settings
   domain = "test.local";
   hostname = "mail.test.local";
-  acmeEmail = "postmaster@test.local";
+  acmeEmail = "admin@example.com";  # Your contact email for Let's Encrypt notifications
+
+  # Mail users (username = SHA512-CRYPT password hash)
+  # Generate hash with: mkpasswd -m sha-512
+  users = {
+    "alice" = "$6$rounds=100000$example$hashhashhashhashhashhashhashhash";  # Example - replace with real hash
+  };
+
+  # Mail aliases (alias = target username)
+  aliases = {
+    "postmaster" = "alice";
+    "abuse" = "alice";
+    "admin" = "alice";
+  };
+
+  # ACME certificate settings
+  # Use staging server for testing (avoids rate limits, but certs aren't browser-trusted)
+  acmeStaging = true;
 
   # Target architecture
   architecture = "aarch64-linux";
@@ -22,5 +39,11 @@
 
     # CIDR block for SSH access ("auto" = current IP, or e.g., "1.2.3.4/32")
     adminCidr = "auto";
+
+    # Route53 DNS settings
+    # Existing hosted zone ID (leave empty to create a new zone for the domain)
+    route53ZoneId = "";
+    # Whether to create MX record (set false during migration, true when ready to go live)
+    route53CreateMX = false;
   };
 }

@@ -28,3 +28,23 @@ output "private_key" {
   value       = tls_private_key.mail_server.private_key_openssh
   sensitive   = true
 }
+
+output "dns_zone_id" {
+  description = "Route53 hosted zone ID"
+  value       = local.zone_id
+}
+
+output "dns_zone_nameservers" {
+  description = "Nameservers for the hosted zone (update at your registrar if zone was created)"
+  value       = var.route53_zone_id == "" ? aws_route53_zone.mail_domain[0].name_servers : ["Using existing zone"]
+}
+
+output "dns_a_record" {
+  description = "A record created for mail server"
+  value       = "${var.hostname} -> ${aws_instance.mail_server.public_ip}"
+}
+
+output "dns_mx_record" {
+  description = "MX record status"
+  value       = var.route53_create_mx ? "${var.domain} MX 10 ${var.hostname}." : "Not created (route53_create_mx = false)"
+}

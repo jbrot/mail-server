@@ -113,12 +113,16 @@
     acceptTerms = true;
     defaults = {
       email = mailServerConfig.acmeEmail;
+    } // lib.optionalAttrs (mailServerConfig.acmeStaging or false) {
+      # Use staging server for testing (avoids rate limits, but certs aren't browser-trusted)
+      server = "https://acme-staging-v02.api.letsencrypt.org/directory";
     };
 
     # Certificate for mail server
     certs.${mailServerConfig.hostname} = {
       # Use HTTP-01 challenge
       webroot = "/var/lib/acme/acme-challenge";
+      group = "nginx";
 
       # Copy certs to /data/certs for containers
       postRun = ''
@@ -183,4 +187,13 @@
 
   # Chrony for time sync
   services.chrony.enable = true;
+
+  # === Mail Server Stack ===
+  services.mailServer = {
+    enable = true;
+    domain = mailServerConfig.domain;
+    hostname = mailServerConfig.hostname;
+    users = mailServerConfig.users or {};
+    aliases = mailServerConfig.aliases or {};
+  };
 }
