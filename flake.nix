@@ -6,8 +6,7 @@
     flake-utils.url = "github:numtide/flake-utils";
 
     # Config input - override for different configs:
-    # nix build .#mail-server-ami --override-input mail-server-config path:./config/production
-    # Default is x86_64; use deploy.sh which auto-selects based on host architecture
+    # deploy.sh auto-selects based on host architecture
     mail-server-config = {
       url = "path:./config/default-x86_64";
       flake = false;
@@ -85,11 +84,7 @@
 
           # mkpasswd for account password hashing
           mkpasswd = pkgs.mkpasswd;
-        } // (if system == mailServerConfig.architecture then {
-          # Custom NixOS AMI for EC2 deployment
-          # Architecture determined by config (x86_64-linux or aarch64-linux)
-          mail-server-ami = self.nixosConfigurations.mail-server.config.system.build.amazonImage;
-        } else {})
+        }
       );
 
       # NixOS configuration for the mail server
