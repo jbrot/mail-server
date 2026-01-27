@@ -34,6 +34,13 @@ pkgs.testers.runNixOSTest {
         "bob" = "$6$060RjN4XgGU35LkE$IJC9LNaAeOwWRsW8h0AVqufnGlENfuKQqAWPSb0O3EXk6IvuixkqpkRij69/K6OJPut0LhlbuOvrKKzfStN.Q.";
       };
 
+      # Test aliases
+      aliases = {
+        "postmaster" = "alice";
+        "info" = "bob";
+        "" = "alice";  # Catchall
+      };
+
       # Use host network to avoid netavark bridge restart issues
       # See: https://github.com/containers/podman/issues/27516
       networking.networks = [ "host" ];
@@ -144,6 +151,51 @@ pkgs.testers.runNixOSTest {
         )
         time.sleep(2)
         mail.succeed("grep -r 'Subject: Message from Alice' /data/mail/bob/")
+
+    # Test delivery via alias - postmaster@test.local -> alice
+    with subtest("Alias delivery: postmaster delivers to Alice"):
+        mail.succeed(
+            "${pkgs.swaks}/bin/swaks "
+            "--to postmaster@test.local "
+            "--from sender@external.com "
+            "--server localhost "
+            "--port 25 "
+            "--timeout 30 "
+            "--header 'Subject: Postmaster Alias Test' "
+            "--body 'This message was sent to postmaster alias.'"
+        )
+        time.sleep(2)
+        mail.succeed("grep -r 'Subject: Postmaster Alias Test' /data/mail/alice/")
+
+    # Test delivery via alias - info@test.local -> bob
+    with subtest("Alias delivery: info delivers to Bob"):
+        mail.succeed(
+            "${pkgs.swaks}/bin/swaks "
+            "--to info@test.local "
+            "--from sender@external.com "
+            "--server localhost "
+            "--port 25 "
+            "--timeout 30 "
+            "--header 'Subject: Info Alias Test' "
+            "--body 'This message was sent to info alias.'"
+        )
+        time.sleep(2)
+        mail.succeed("grep -r 'Subject: Info Alias Test' /data/mail/bob/")
+
+    # Test catchall - unknown@test.local -> alice
+    with subtest("Catchall delivery: unknown address delivers to Alice"):
+        mail.succeed(
+            "${pkgs.swaks}/bin/swaks "
+            "--to nobody@test.local "
+            "--from sender@external.com "
+            "--server localhost "
+            "--port 25 "
+            "--timeout 30 "
+            "--header 'Subject: Catchall Test' "
+            "--body 'This message was sent to an unknown address.'"
+        )
+        time.sleep(2)
+        mail.succeed("grep -r 'Subject: Catchall Test' /data/mail/alice/")
 
     # Verify mailbox isolation - Alice's maildir should not have Bob's mail
     with subtest("Mailbox isolation"):

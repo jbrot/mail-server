@@ -35,6 +35,11 @@ pkgs.testers.runNixOSTest {
         "alice" = "$6$060RjN4XgGU35LkE$IJC9LNaAeOwWRsW8h0AVqufnGlENfuKQqAWPSb0O3EXk6IvuixkqpkRij69/K6OJPut0LhlbuOvrKKzfStN.Q.";
         "bob" = "$6$060RjN4XgGU35LkE$IJC9LNaAeOwWRsW8h0AVqufnGlENfuKQqAWPSb0O3EXk6IvuixkqpkRij69/K6OJPut0LhlbuOvrKKzfStN.Q.";
       };
+      # Test aliases
+      aliases = {
+        "postmaster" = "alice";
+        "info" = "bob";
+      };
       # Use isolated network
       networking.networks = [ "test-net" ];
       networking.publishPorts = [ "25:25" "587:587" ];
@@ -208,6 +213,55 @@ pkgs.testers.runNixOSTest {
         # Bob should have 2 messages: external email + Alice's message
         assert "* SEARCH 1 2" in result or "* SEARCH 2 1" in result, \
             f"Bob should have 2 messages: {result}"
+
+    # Test LMTP delivery via alias - postmaster@test.local -> alice
+    with subtest("Alias LMTP delivery: postmaster delivers to Alice"):
+        mail.succeed(
+            "${pkgs.swaks}/bin/swaks "
+            "--to postmaster@test.local "
+            "--from sender@external.com "
+            "--server localhost "
+            "--port 25 "
+            "--timeout 30 "
+            "--header 'Subject: Postmaster Alias LMTP Test' "
+            "--body 'This message was sent to postmaster alias via LMTP.'"
+        )
+        time.sleep(3)
+        mail.succeed("grep -r 'Subject: Postmaster Alias LMTP Test' /data/mail/alice/")
+
+    # Test LMTP delivery via alias - info@test.local -> bob
+    with subtest("Alias LMTP delivery: info delivers to Bob"):
+        mail.succeed(
+            "${pkgs.swaks}/bin/swaks "
+            "--to info@test.local "
+            "--from sender@external.com "
+            "--server localhost "
+            "--port 25 "
+            "--timeout 30 "
+            "--header 'Subject: Info Alias LMTP Test' "
+            "--body 'This message was sent to info alias via LMTP.'"
+        )
+        time.sleep(3)
+        mail.succeed("grep -r 'Subject: Info Alias LMTP Test' /data/mail/bob/")
+
+    # Verify Bob now has 3 messages (external + Alice's submission + info alias)
+    with subtest("Bob has all expected messages after alias tests"):
+        result = mail.succeed("""
+            (
+                sleep 1
+                echo 'a001 LOGIN bob testpass'
+                sleep 1
+                echo 'a002 SELECT INBOX'
+                sleep 1
+                echo 'a003 SEARCH ALL'
+                sleep 1
+                echo 'a004 LOGOUT'
+                sleep 1
+            ) | ${pkgs.openssl}/bin/openssl s_client -connect localhost:993 -quiet 2>/dev/null
+        """)
+        assert "a001 OK" in result, f"IMAP LOGIN failed for Bob: {result}"
+        assert "* SEARCH 1 2 3" in result, \
+            f"Bob should have 3 messages: {result}"
 
     # Verify mailbox isolation - Alice should NOT see Bob's mail
     with subtest("Mailbox isolation - Alice cannot see Bob's mail"):

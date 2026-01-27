@@ -18,7 +18,7 @@ let
     pki ${cfg.serverDomain} key "/data/certs/key.pem"
 
     # Tables
-    table aliases file:/etc/smtpd/aliases
+    table virtuals file:/etc/smtpd/virtuals
     ${lib.optionalString (cfg.credentials != {}) "table credentials file:/etc/smtpd/credentials"}
     ${lib.optionalString (cfg.credentials != {}) "table users file:/etc/smtpd/userbase"}
 
@@ -51,14 +51,14 @@ let
 
     # Actions
     ${if cfg.localDelivery then ''
-    action "local_mail" maildir "/data/mail/%{dest.user}" junk userbase <users> alias <aliases>
+    action "local_mail" maildir "/data/mail/%{dest.user}" junk userbase <users> virtual <virtuals>
     '' else ''
-    action "local_mail" lmtp ${cfg.lmtpHost}:${toString cfg.lmtpPort} userbase <users> alias <aliases>
+    action "local_mail" lmtp ${cfg.lmtpHost}:${toString cfg.lmtpPort} userbase <users> virtual <virtuals>
     ''}
     action "outbound" relay helo ${cfg.serverDomain}
 
     # Matching rules
-    # Accept mail for recipients in aliases
+    # Accept mail for domain ${cfg.emailDomain}
     match from any for domain "${cfg.emailDomain}" action "local_mail"
 
     # Allow authenticated users to send mail anywhere
@@ -276,10 +276,13 @@ in
         mode = "0644";
       };
 
-      "smtpd/aliases" = {
+      "smtpd/virtuals" = {
         text = lib.concatStringsSep "\n" (
-          # Custom aliases
-          (lib.mapAttrsToList (name: target: "${name}@${cfg.emailDomain}    ${target}") cfg.aliases)
+          # Identity mappings for all users (required by virtual table)
+          (map (user: "${user}@${cfg.emailDomain}    ${user}") usernames)
+          ++
+          # Custom aliases (target includes domain so %{dest.user} resolves correctly)
+          (lib.mapAttrsToList (name: target: "${name}@${cfg.emailDomain}    ${target}@${cfg.emailDomain}") cfg.aliases)
         ) + "\n";
         mode = "0644";
       };
