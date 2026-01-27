@@ -9,7 +9,6 @@ pkgs.testers.runNixOSTest {
   nodes.mail = { config, pkgs, lib, ... }: {
     imports = [
       ../nixos/test-certs.nix
-      ../nixos/test-network.nix
       ../nixos/opensmtpd.nix
     ];
 
@@ -35,16 +34,14 @@ pkgs.testers.runNixOSTest {
         "bob" = "$6$060RjN4XgGU35LkE$IJC9LNaAeOwWRsW8h0AVqufnGlENfuKQqAWPSb0O3EXk6IvuixkqpkRij69/K6OJPut0LhlbuOvrKKzfStN.Q.";
       };
 
-      # Use test network
-      networking.networks = [ "test-net" ];
-      networking.publishPorts = [ "25:25" "587:587" ];
+      # Use host network to avoid netavark bridge restart issues
+      # See: https://github.com/containers/podman/issues/27516
+      networking.networks = [ "host" ];
+      networking.publishPorts = [ ];  # Not needed with host networking
     };
 
-    # Enable test network (creates bridge network for containers)
-    services.testNetwork.enable = true;
-
-    # Ensure certs and network are ready before container
-    systemd.services.podman-opensmtpd.after = [ "generate-test-certs.service" "create-test-network.service" ];
+    # Ensure certs are ready before container
+    systemd.services.podman-opensmtpd.after = [ "generate-test-certs.service" ];
 
     # Use tmpfs for /data
     fileSystems."/data" = {
@@ -56,8 +53,8 @@ pkgs.testers.runNixOSTest {
     # Disable firewall for testing
     networking.firewall.enable = false;
 
-    # Use localhost DNS to prevent DNS lookup hangs
-    networking.nameservers = [ "127.0.0.1" ];
+    # Fast-failing DNS (no internet in VM tests)
+    networking.nameservers = lib.mkForce [ "127.0.0.1" ];
 
     # Set hostname
     networking.hostName = "mail";
@@ -70,6 +67,8 @@ pkgs.testers.runNixOSTest {
       podman.enable = true;
     };
 
+    # Packages needed for tests
+    environment.systemPackages = [ pkgs.openssl ];
   };
 
   testScript = ''
@@ -150,6 +149,50 @@ pkgs.testers.runNixOSTest {
     with subtest("Mailbox isolation"):
         mail.fail("grep -r 'Email for Bob' /data/mail/alice/")
         mail.fail("grep -r 'Email for Alice' /data/mail/bob/")
+
+    # Test: Certificate reload
+    with subtest("Certificate reload updates TLS cert"):
+        # Get initial cert fingerprint
+        initial_fp = mail.succeed(
+            "openssl x509 -noout -fingerprint -sha256 -in /data/certs/fullchain.pem | cut -d= -f2"
+        ).strip()
+
+        # Verify SMTP is serving this cert
+        smtp_fp = mail.succeed(
+            "openssl s_client -connect localhost:587 -starttls smtp </dev/null 2>/dev/null | "
+            "sed -n '/-----BEGIN CERTIFICATE-----/,/-----END CERTIFICATE-----/p' | "
+            "openssl x509 -noout -fingerprint -sha256 | cut -d= -f2"
+        ).strip()
+        assert smtp_fp == initial_fp, f"Initial cert mismatch: {smtp_fp} != {initial_fp}"
+
+        # Generate NEW cert
+        mail.succeed("""
+            openssl req -x509 -newkey rsa:2048 -nodes \
+              -keyout /data/certs/key.pem -out /data/certs/fullchain.pem \
+              -days 1 -subj "/CN=localhost/O=RENEWED"
+            chmod 644 /data/certs/fullchain.pem
+            chmod 640 /data/certs/key.pem
+        """)
+
+        # Verify new cert is different
+        new_fp = mail.succeed(
+            "openssl x509 -noout -fingerprint -sha256 -in /data/certs/fullchain.pem | cut -d= -f2"
+        ).strip()
+        assert new_fp != initial_fp, "New cert should have different fingerprint"
+
+        # Reload service (same command as ACME postRun)
+        mail.succeed("systemctl try-reload-or-restart podman-opensmtpd.service")
+        mail.wait_for_open_port(587, timeout=60)
+
+        # Verify SMTP now serves NEW cert
+        smtp_fp_after = mail.succeed(
+            "openssl s_client -connect localhost:587 -starttls smtp </dev/null 2>/dev/null | "
+            "sed -n '/-----BEGIN CERTIFICATE-----/,/-----END CERTIFICATE-----/p' | "
+            "openssl x509 -noout -fingerprint -sha256 | cut -d= -f2"
+        ).strip()
+
+        assert smtp_fp_after == new_fp, f"Cert not reloaded: {smtp_fp_after} != {new_fp}"
+        print("OpenSMTPd successfully reloaded with new certificate!")
 
     print("OpenSMTPd standalone test passed!")
   '';

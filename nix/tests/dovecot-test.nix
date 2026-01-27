@@ -9,7 +9,6 @@ pkgs.testers.runNixOSTest {
   nodes.mail = { config, pkgs, lib, ... }: {
     imports = [
       ../nixos/test-certs.nix
-      ../nixos/test-network.nix
       ../nixos/dovecot.nix
     ];
 
@@ -33,16 +32,14 @@ pkgs.testers.runNixOSTest {
 
       enableLmtp = true;
 
-      # Use test network
-      networking.networks = [ "test-net" ];
-      networking.publishPorts = [ "993:993" "143:143" "24:24" ];
+      # Use host network to avoid netavark bridge restart issues
+      # See: https://github.com/containers/podman/issues/27516
+      networking.networks = [ "host" ];
+      networking.publishPorts = [ ];  # Not needed with host networking
     };
 
-    # Enable test network (creates bridge network for containers)
-    services.testNetwork.enable = true;
-
-    # Ensure certs and network are ready before Dovecot starts
-    systemd.services.podman-dovecot.after = [ "generate-test-certs.service" "create-test-network.service" ];
+    # Ensure certs are ready before Dovecot starts
+    systemd.services.podman-dovecot.after = [ "generate-test-certs.service" ];
 
     # Use tmpfs for /data
     fileSystems."/data" = {
@@ -54,6 +51,9 @@ pkgs.testers.runNixOSTest {
     # Disable firewall for testing
     networking.firewall.enable = false;
 
+    # Fast-failing DNS (no internet in VM tests)
+    networking.nameservers = lib.mkForce [ "127.0.0.1" ];
+
     # Set hostname
     networking.hostName = "mail";
 
@@ -64,6 +64,9 @@ pkgs.testers.runNixOSTest {
       diskSize = 4096;  # Larger disk for container images
       podman.enable = true;
     };
+
+    # Packages needed for tests
+    environment.systemPackages = [ pkgs.openssl ];
   };
 
   testScript = ''
@@ -331,6 +334,50 @@ pkgs.testers.runNixOSTest {
         assert "Spam Test Message" in junk_content, \
             f"Spam message not found in Junk folder: {junk_content[:500]}"
         print("SUCCESS: Spam message correctly delivered to Junk folder")
+
+    # Test: Certificate reload
+    with subtest("Certificate reload updates TLS cert"):
+        # Get initial cert fingerprint
+        initial_fp = mail.succeed(
+            "openssl x509 -noout -fingerprint -sha256 -in /data/certs/fullchain.pem | cut -d= -f2"
+        ).strip()
+
+        # Verify IMAP is serving this cert
+        imap_fp = mail.succeed(
+            "openssl s_client -connect localhost:993 </dev/null 2>/dev/null | "
+            "sed -n '/-----BEGIN CERTIFICATE-----/,/-----END CERTIFICATE-----/p' | "
+            "openssl x509 -noout -fingerprint -sha256 | cut -d= -f2"
+        ).strip()
+        assert imap_fp == initial_fp, f"Initial cert mismatch: {imap_fp} != {initial_fp}"
+
+        # Generate NEW cert
+        mail.succeed("""
+            openssl req -x509 -newkey rsa:2048 -nodes \
+              -keyout /data/certs/key.pem -out /data/certs/fullchain.pem \
+              -days 1 -subj "/CN=localhost/O=RENEWED"
+            chmod 644 /data/certs/fullchain.pem
+            chmod 640 /data/certs/key.pem
+        """)
+
+        # Verify new cert is different
+        new_fp = mail.succeed(
+            "openssl x509 -noout -fingerprint -sha256 -in /data/certs/fullchain.pem | cut -d= -f2"
+        ).strip()
+        assert new_fp != initial_fp, "New cert should have different fingerprint"
+
+        # Reload service (same command as ACME postRun)
+        mail.succeed("systemctl try-reload-or-restart podman-dovecot.service")
+        mail.wait_for_open_port(993, timeout=60)
+
+        # Verify IMAP now serves NEW cert
+        imap_fp_after = mail.succeed(
+            "openssl s_client -connect localhost:993 </dev/null 2>/dev/null | "
+            "sed -n '/-----BEGIN CERTIFICATE-----/,/-----END CERTIFICATE-----/p' | "
+            "openssl x509 -noout -fingerprint -sha256 | cut -d= -f2"
+        ).strip()
+
+        assert imap_fp_after == new_fp, f"Cert not reloaded: {imap_fp_after} != {new_fp}"
+        print("Dovecot successfully reloaded with new certificate!")
 
     print("Dovecot standalone test passed!")
   '';

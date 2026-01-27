@@ -389,6 +389,8 @@ in
       serviceConfig = {
         Restart = "always";
         RestartSec = "10s";
+        # Reload sends SIGHUP to dovecot, which reloads config and certificates
+        ExecReload = "${config.virtualisation.podman.package}/bin/podman kill --signal=HUP dovecot";
 
         # Systemd hardening
         # Note: ProtectSystem omitted - podman needs write access to /var/lib/containers and /etc/containers
