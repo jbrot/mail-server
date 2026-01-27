@@ -99,6 +99,11 @@ run_dig() {
     nix shell $NIX_VERBOSE .#dig -c dig "$@"
 }
 
+# Run swaks via nix using the pinned version from our flake
+run_swaks() {
+    nix run $NIX_VERBOSE .#swaks -- "$@"
+}
+
 # Check AWS credentials and prompt to configure if needed
 ensure_aws_credentials() {
     log_info "Checking AWS credentials..."
@@ -608,6 +613,142 @@ test_acme() {
     return $failed
 }
 
+test_mail() {
+    log_info "=== Mail send/receive test ==="
+
+    # Auto-pick first user from config accounts directory
+    local accounts_dir="${PROJECT_DIR}/${CONFIG_DIR}/accounts"
+    if [[ ! -d "$accounts_dir" ]]; then
+        log_error "No accounts directory found at $accounts_dir"
+        return 1
+    fi
+
+    local first_user
+    first_user=$(ls "$accounts_dir" | head -1)
+    if [[ -z "$first_user" ]]; then
+        log_error "No accounts found in $accounts_dir"
+        return 1
+    fi
+
+    local email="${first_user}@${DOMAIN}"
+    log_info "Using account: $email"
+
+    # Wait for SMTP and IMAP services
+    if ! wait_for_unit "podman-opensmtpd.service" 18; then
+        log_error "OpenSMTPd service not ready."
+        return 1
+    fi
+    if ! wait_for_port "$HOSTNAME" 587 18; then
+        log_error "SMTP submission port 587 not open."
+        return 1
+    fi
+    if ! wait_for_unit "podman-dovecot.service" 18; then
+        log_error "Dovecot service not ready."
+        return 1
+    fi
+    if ! wait_for_port "$HOSTNAME" 993 18; then
+        log_error "IMAP port 993 not open."
+        return 1
+    fi
+
+    # Escape a string for use inside IMAP double-quoted strings (\\ and \")
+    imap_quote() {
+        local s="$1"
+        s="${s//\\/\\\\}"
+        s="${s//\"/\\\"}"
+        printf '%s' "$s"
+    }
+
+    # Password prompt loop (up to 3 attempts)
+    local password=""
+    local max_pw_attempts=3
+    local pw_attempt=0
+
+    while [[ $pw_attempt -lt $max_pw_attempts ]]; do
+        ((pw_attempt++))
+        echo -n "Enter password for $email (attempt $pw_attempt/$max_pw_attempts): "
+        read -s password
+        echo ""
+
+        if [[ -z "$password" ]]; then
+            log_warn "Password cannot be empty."
+            continue
+        fi
+
+        # Validate credentials via IMAP LOGIN
+        local imap_response
+        local q_user q_pass
+        q_user=$(imap_quote "$first_user")
+        q_pass=$(imap_quote "$password")
+        imap_response=$(run_openssl s_client -connect "${HOSTNAME}:993" -quiet 2>/dev/null <<IMAP_EOF
+a1 LOGIN "$q_user" "$q_pass"
+a2 LOGOUT
+IMAP_EOF
+        ) || true
+
+        if echo "$imap_response" | grep -q "a1 OK"; then
+            log_info "IMAP authentication successful."
+            break
+        else
+            log_warn "IMAP authentication failed."
+            password=""
+        fi
+    done
+
+    if [[ -z "$password" ]]; then
+        log_error "Failed to authenticate after $max_pw_attempts attempts."
+        return 1
+    fi
+
+    # Send test email via authenticated SMTP submission
+    local test_subject="deploy-test-$(date +%s)"
+    log_info "Sending test email with subject: $test_subject"
+
+    if ! run_swaks \
+        --to "$email" \
+        --from "$email" \
+        --server "$HOSTNAME" \
+        --port 587 \
+        -tls \
+        --auth-user "$first_user" \
+        --auth-password "$password" \
+        --header "Subject: $test_subject" \
+        --body "E2E test from deploy.sh"; then
+        log_error "swaks SMTP send failed."
+        return 1
+    fi
+    log_info "Test email sent."
+
+    # Wait briefly for delivery
+    sleep 5
+
+    # Verify receipt via IMAP
+    log_info "Checking IMAP for delivered message..."
+    local imap_search
+    local q_user q_pass
+    q_user=$(imap_quote "$first_user")
+    q_pass=$(imap_quote "$password")
+    imap_search=$(run_openssl s_client -connect "${HOSTNAME}:993" -quiet 2>/dev/null <<IMAP_EOF
+a1 LOGIN "$q_user" "$q_pass"
+a2 SELECT INBOX
+a3 SEARCH SUBJECT "$test_subject"
+a4 LOGOUT
+IMAP_EOF
+    ) || true
+
+    if echo "$imap_search" | grep -q "^\* SEARCH [0-9]"; then
+        log_info "Mail delivery verified: message found in INBOX."
+    else
+        log_error "Mail delivery verification failed: message not found in INBOX."
+        log_error "IMAP response:"
+        echo "$imap_search"
+        return 1
+    fi
+
+    log_info "Mail send/receive test passed!"
+    return 0
+}
+
 phase_e2e() {
     log_step "Phase: e2e"
     setup_ssh
@@ -615,6 +756,7 @@ phase_e2e() {
     local failed=0
 
     test_acme || failed=1
+    test_mail || failed=1
 
     # Summary
     if [[ $failed -eq 0 ]]; then

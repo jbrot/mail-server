@@ -84,6 +84,9 @@
 
           # mkpasswd for account password hashing
           mkpasswd = pkgs.mkpasswd;
+
+          # swaks for SMTP testing in e2e
+          swaks = pkgs.swaks;
         }
       );
 
