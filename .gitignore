@@ -33,5 +33,5 @@ secrets/
 # Production config (keep out of version control)
 config/production/
 
-# Generated terraform vars from Nix config
+# Generated terraform vars (symlink to nix store)
 terraform/from-nix.auto.tfvars

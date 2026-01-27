@@ -97,10 +97,6 @@
     };
   };
 
-  # Root user SSH keys (add your public key here)
-  users.users.root.openssh.authorizedKeys.keys = [
-    # "ssh-ed25519 AAAA... your-key-here"
-  ];
 
   # Create vmail user for mail storage
   users.users.vmail = {
@@ -175,13 +171,6 @@
         "allow netdata.conf from" = "localhost";
       };
     };
-  };
-
-  # Automatic system updates (optional, can be disabled)
-  system.autoUpgrade = {
-    enable = false;  # Enable if you want automatic updates
-    allowReboot = false;
-    flake = "github:your-org/email-server";  # Update with your flake URL
   };
 
   # Journald configuration

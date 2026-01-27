@@ -51,6 +51,15 @@
             { name = "rspamd-image"; path = self.packages.${system}.rspamd-image; }
             { name = "redis-image"; path = self.packages.${system}.redis-image; }
           ];
+
+          # Terraform variables generated from Nix config
+          tfvars = import ./nix/tfvars.nix { inherit pkgs mailServerConfig; };
+
+          # Terraform from pinned nixpkgs (for deploy.sh)
+          terraform = pkgs.terraform;
+
+          # AWS CLI from pinned nixpkgs (for deploy.sh)
+          awscli = pkgs.awscli2;
         } // (if system == mailServerConfig.architecture then {
           # Custom NixOS AMI for EC2 deployment
           # Architecture determined by config (x86_64-linux or aarch64-linux)
@@ -107,11 +116,10 @@
               echo "  nix build .#dovecot-image    - Build Dovecot container"
               echo "  nix build .#rspamd-image     - Build Rspamd container"
               echo "  nix build .#all-images       - Build all containers"
-              echo "  nix build .#mail-server-ami  - Build EC2 AMI"
               echo ""
               echo "  nix flake check              - Run all tests"
               echo ""
-              echo "  ./scripts/deploy.sh          - Build and deploy AMI"
+              echo "  ./scripts/deploy.sh          - Deploy to EC2 via nixos-rebuild"
               echo "  ./scripts/deploy.sh --help   - Show deploy options"
               echo ""
 

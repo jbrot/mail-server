@@ -1,8 +1,13 @@
 # EC2-specific hardware configuration
 # nix/nixos/hardware-ec2.nix
 
-{ config, lib, pkgs, modulesPath, ... }:
+{ config, lib, pkgs, modulesPath, mailServerConfig, ... }:
 
+let
+  # Determine if we're on an EFI system
+  # aarch64 always uses EFI; x86_64 community AMIs typically use BIOS
+  isEfi = mailServerConfig.architecture == "aarch64-linux";
+in
 {
   imports = [
     # This module provides config.system.build.amazonImage
@@ -10,16 +15,11 @@
   ];
 
   # EC2 instance settings
+  # amazon-image.nix configures the bootloader based on ec2.efi:
+  # - x86_64 (efi=false): BIOS boot, grub.device="/dev/xvda"
+  # - aarch64 (efi=true): EFI boot, grub.device="nodev"
   ec2.hvm = true;
-  ec2.efi = true;
-
-  # AMI image size - needs to be large enough for NixOS + all container images
-  amazonImage.sizeMB = 8192;  # 8 GB
-
-  # Boot configuration
-  boot.loader.grub.device = "nodev";
-  boot.loader.grub.efiSupport = true;
-  boot.loader.grub.efiInstallAsRemovable = true;
+  ec2.efi = isEfi;
 
   # Kernel modules for AWS
   boot.initrd.availableKernelModules = [
@@ -36,7 +36,7 @@
   fileSystems."/data" = {
     device = "/dev/disk/by-label/data";
     fsType = "ext4";
-    options = [ "defaults" "nofail" ];
+    options = [ "defaults" ];
     autoFormat = false;
   };
 

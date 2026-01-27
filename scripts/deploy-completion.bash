@@ -28,15 +28,21 @@ _deploy_sh_completions() {
     local config_dir="${project_dir}/config"
 
     # Options
-    opts="--config --skip-tests --list-configs --help -h"
+    opts="-h --help -c --config -s --skip -o --only -v --verbose --list-configs"
+    phases="tests infra deploy"
 
     case "${prev}" in
-        --config)
+        -c|--config)
             # Complete with available config directories
             if [[ -d "$config_dir" ]]; then
                 configs=$(find "$config_dir" -mindepth 1 -maxdepth 1 -type d -exec basename {} \; 2>/dev/null)
                 COMPREPLY=( $(compgen -W "${configs}" -- "${cur}") )
             fi
+            return 0
+            ;;
+        -s|--skip|-o|--only)
+            # Complete with phase names
+            COMPREPLY=( $(compgen -W "${phases}" -- "${cur}") )
             return 0
             ;;
         *)
