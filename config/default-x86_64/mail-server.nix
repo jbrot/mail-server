@@ -9,11 +9,8 @@
   hostname = "mail.test.local";
   acmeEmail = "admin@example.com";  # Your contact email for Let's Encrypt notifications
 
-  # Mail users (username = SHA512-CRYPT password hash)
-  # Generate hash with: mkpasswd -m sha-512
-  users = {
-    "alice" = "$6$rounds=100000$example$hashhashhashhashhashhashhashhash";  # Example - replace with real hash
-  };
+  # Mail users are loaded from the accounts/ directory.
+  # Create accounts with: ./scripts/create-account.sh
 
   # Mail aliases (alias = target username)
   aliases = {

@@ -29,7 +29,25 @@
       });
 
       # Import mail server configuration from the config input
-      mailServerConfig = import "${mail-server-config}/mail-server.nix";
+      # Merges account files from config/<name>/accounts/ into the users attribute
+      mailServerConfig =
+        let
+          baseConfig = import "${mail-server-config}/mail-server.nix";
+          accountsDir = "${mail-server-config}/accounts";
+          accountUsers =
+            if builtins.pathExists accountsDir then
+              let
+                entries = builtins.readDir accountsDir;
+                userNames = builtins.attrNames entries;
+              in
+              builtins.listToAttrs (map (name: {
+                inherit name;
+                value = builtins.replaceStrings ["\n"] [""]
+                  (builtins.readFile "${accountsDir}/${name}");
+              }) userNames)
+            else {};
+        in
+          baseConfig // { users = (baseConfig.users or {}) // accountUsers; };
 
     in
     {
@@ -64,6 +82,9 @@
           # OpenSSL and dig for e2e tests in deploy.sh
           openssl = pkgs.openssl;
           dig = pkgs.dnsutils;
+
+          # mkpasswd for account password hashing
+          mkpasswd = pkgs.mkpasswd;
         } // (if system == mailServerConfig.architecture then {
           # Custom NixOS AMI for EC2 deployment
           # Architecture determined by config (x86_64-linux or aarch64-linux)
