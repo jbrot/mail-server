@@ -212,6 +212,11 @@
           dovecot-rspamd = import ./nix/tests/dovecot-rspamd-test.nix {
             inherit pkgs self;
           };
+
+          # Format data volume service test (verifies disk formatting logic)
+          format-data-volume = import ./nix/tests/format-data-volume-test.nix {
+            inherit pkgs;
+          };
         } else {})
       );
     };

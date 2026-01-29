@@ -12,6 +12,7 @@ in
   imports = [
     # This module provides config.system.build.amazonImage
     "${modulesPath}/../maintainers/scripts/ec2/amazon-image.nix"
+    ./format-data-volume.nix
   ];
 
   # EC2 instance settings
@@ -48,39 +49,6 @@ in
   # Time zone
   time.timeZone = "UTC";
 
-  # Systemd service to format and label the data volume on first boot
-  systemd.services.format-data-volume = {
-    description = "Format and label data volume if needed";
-    wantedBy = [ "local-fs-pre.target" ];
-    before = [ "local-fs-pre.target" ];
-    unitConfig.DefaultDependencies = false;
-    serviceConfig = {
-      Type = "oneshot";
-      RemainAfterExit = true;
-    };
-    script = ''
-      # Find the EBS data volume (could be xvdf or nvme1n1)
-      DEVICE=""
-      for dev in /dev/xvdf /dev/nvme1n1; do
-        if [ -b "$dev" ]; then
-          DEVICE="$dev"
-          break
-        fi
-      done
-
-      if [ -z "$DEVICE" ]; then
-        echo "No data volume found, skipping"
-        exit 0
-      fi
-
-      # Check if already formatted
-      if ! ${pkgs.e2fsprogs}/bin/blkid -o value -s TYPE "$DEVICE" | grep -q ext4; then
-        echo "Formatting $DEVICE as ext4..."
-        ${pkgs.e2fsprogs}/bin/mkfs.ext4 -L data "$DEVICE"
-      elif ! ${pkgs.e2fsprogs}/bin/blkid -o value -s LABEL "$DEVICE" | grep -q data; then
-        echo "Adding label to $DEVICE..."
-        ${pkgs.e2fsprogs}/bin/e2label "$DEVICE" data
-      fi
-    '';
-  };
+  # Format and label the EBS data volume on first boot
+  services.formatDataVolume.enable = true;
 }
