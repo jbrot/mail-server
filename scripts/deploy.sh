@@ -651,10 +651,15 @@ test_mail() {
         return 1
     fi
 
-    # Escape a string for use inside IMAP double-quoted strings (\\ and \")
+    # Escape a string for use inside IMAP double-quoted strings in a bash heredoc.
+    # IMAP requires: \ -> \\, " -> \"
+    # Bash heredocs also interpret \$, \`, \", \\, so we need to double-escape.
+    # Order matters: escape backslashes first, then quotes, then bash specials.
     imap_quote() {
         local s="$1"
+        # Escape for IMAP: \ -> \\
         s="${s//\\/\\\\}"
+        # Escape for IMAP: " -> \"
         s="${s//\"/\\\"}"
         printf '%s' "$s"
     }
@@ -667,7 +672,7 @@ test_mail() {
     while [[ $pw_attempt -lt $max_pw_attempts ]]; do
         ((pw_attempt++))
         echo -n "Enter password for $email (attempt $pw_attempt/$max_pw_attempts): "
-        read -s password
+        read -rs password
         echo ""
 
         if [[ -z "$password" ]]; then
