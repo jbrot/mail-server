@@ -195,5 +195,10 @@
     hostname = mailServerConfig.hostname;
     users = mailServerConfig.users or {};
     aliases = mailServerConfig.aliases or {};
+    dkim = {
+      enable = mailServerConfig.dkim.enable or false;
+      selector = mailServerConfig.dkim.selector or "mail";
+      route53ZoneId = mailServerConfig.aws.route53ZoneId or "";
+    };
   };
 }

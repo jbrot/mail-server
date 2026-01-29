@@ -13,6 +13,7 @@ in
     ./dovecot.nix
     ./rspamd.nix
     ./mail-networks.nix
+    ./dkim.nix
   ];
 
   options.services.mailServer = {
@@ -83,6 +84,12 @@ in
         default = "mail";
         description = "DKIM selector";
       };
+
+      route53ZoneId = lib.mkOption {
+        type = lib.types.str;
+        default = "";
+        description = "Route53 hosted zone ID for automatic DKIM DNS record creation. Empty to disable.";
+      };
     };
 
     # Debug options
@@ -104,6 +111,17 @@ in
     # mail-networks.nix creates 7 isolated networks:
     # - External: mail-smtp-external, mail-imap-external, mail-rspamd-external
     # - Internal: mail-smtp-rspamd, mail-smtp-lmtp, mail-rspamd-redis, mail-dovecot-rspamd
+
+    # === DKIM Key Manager ===
+    services.dkimKeyManager = {
+      enable = cfg.dkim.enable;
+      domain = cfg.domain;
+      selector = cfg.dkim.selector;
+      route53 = {
+        enable = cfg.dkim.route53ZoneId != "";
+        zoneId = cfg.dkim.route53ZoneId;
+      };
+    };
 
     # === Rspamd Configuration ===
     services.rspamdContainer = {
@@ -173,10 +191,10 @@ in
     };
 
     # === Service Ordering ===
-    # Redis starts first, then rspamd, then dovecot, then opensmtpd
+    # DKIM key manager runs first, then Redis, then rspamd, then dovecot, then opensmtpd
     # All containers depend on mail-network-setup
     systemd.services.podman-rspamd-redis.after = [ "mail-network-setup.service" ];
-    systemd.services.podman-rspamd.after = [ "podman-rspamd-redis.service" "mail-network-setup.service" ];
+    systemd.services.podman-rspamd.after = [ "podman-rspamd-redis.service" "mail-network-setup.service" "dkim-key-manager.service" ];
     systemd.services.podman-dovecot.after = [ "podman-rspamd.service" "mail-network-setup.service" ];
     systemd.services.podman-opensmtpd.after = [ "podman-dovecot.service" "podman-rspamd.service" "mail-network-setup.service" ];
 

@@ -180,49 +180,49 @@ pkgs.testers.runNixOSTest {
     # Give all services time to fully initialize
     time.sleep(5)
 
-    # # Verify container network assignments
-    # with subtest("Containers have correct network assignments"):
-    #     # Check OpenSMTPd networks
-    #     smtp_networks = mail.succeed("podman inspect opensmtpd --format '{{range $k, $v := .NetworkSettings.Networks}}{{$k}} {{end}}'")
-    #     assert "mail-smtp-external" in smtp_networks, f"OpenSMTPd missing mail-smtp-external: {smtp_networks}"
-    #     assert "mail-smtp-rspamd" in smtp_networks, f"OpenSMTPd missing mail-smtp-rspamd: {smtp_networks}"
-    #     assert "mail-smtp-lmtp" in smtp_networks, f"OpenSMTPd missing mail-smtp-lmtp: {smtp_networks}"
+    # Verify container network assignments
+    with subtest("Containers have correct network assignments"):
+        # Check OpenSMTPd networks
+        smtp_networks = mail.succeed("podman inspect opensmtpd --format '{{range $k, $v := .NetworkSettings.Networks}}{{$k}} {{end}}'")
+        assert "mail-smtp-external" in smtp_networks, f"OpenSMTPd missing mail-smtp-external: {smtp_networks}"
+        assert "mail-smtp-rspamd" in smtp_networks, f"OpenSMTPd missing mail-smtp-rspamd: {smtp_networks}"
+        assert "mail-smtp-lmtp" in smtp_networks, f"OpenSMTPd missing mail-smtp-lmtp: {smtp_networks}"
 
-    #     # Check Dovecot networks
-    #     dovecot_networks = mail.succeed("podman inspect dovecot --format '{{range $k, $v := .NetworkSettings.Networks}}{{$k}} {{end}}'")
-    #     assert "mail-imap-external" in dovecot_networks, f"Dovecot missing mail-imap-external: {dovecot_networks}"
-    #     assert "mail-smtp-lmtp" in dovecot_networks, f"Dovecot missing mail-smtp-lmtp: {dovecot_networks}"
-    #     assert "mail-dovecot-rspamd" in dovecot_networks, f"Dovecot missing mail-dovecot-rspamd: {dovecot_networks}"
+        # Check Dovecot networks
+        dovecot_networks = mail.succeed("podman inspect dovecot --format '{{range $k, $v := .NetworkSettings.Networks}}{{$k}} {{end}}'")
+        assert "mail-imap-external" in dovecot_networks, f"Dovecot missing mail-imap-external: {dovecot_networks}"
+        assert "mail-smtp-lmtp" in dovecot_networks, f"Dovecot missing mail-smtp-lmtp: {dovecot_networks}"
+        assert "mail-dovecot-rspamd" in dovecot_networks, f"Dovecot missing mail-dovecot-rspamd: {dovecot_networks}"
 
-    #     # Check Rspamd networks
-    #     rspamd_networks = mail.succeed("podman inspect rspamd --format '{{range $k, $v := .NetworkSettings.Networks}}{{$k}} {{end}}'")
-    #     assert "mail-rspamd-external" in rspamd_networks, f"Rspamd missing mail-rspamd-external: {rspamd_networks}"
-    #     assert "mail-smtp-rspamd" in rspamd_networks, f"Rspamd missing mail-smtp-rspamd: {rspamd_networks}"
-    #     assert "mail-rspamd-redis" in rspamd_networks, f"Rspamd missing mail-rspamd-redis: {rspamd_networks}"
-    #     assert "mail-dovecot-rspamd" in rspamd_networks, f"Rspamd missing mail-dovecot-rspamd: {rspamd_networks}"
+        # Check Rspamd networks
+        rspamd_networks = mail.succeed("podman inspect rspamd --format '{{range $k, $v := .NetworkSettings.Networks}}{{$k}} {{end}}'")
+        assert "mail-rspamd-external" in rspamd_networks, f"Rspamd missing mail-rspamd-external: {rspamd_networks}"
+        assert "mail-smtp-rspamd" in rspamd_networks, f"Rspamd missing mail-smtp-rspamd: {rspamd_networks}"
+        assert "mail-rspamd-redis" in rspamd_networks, f"Rspamd missing mail-rspamd-redis: {rspamd_networks}"
+        assert "mail-dovecot-rspamd" in rspamd_networks, f"Rspamd missing mail-dovecot-rspamd: {rspamd_networks}"
 
-    #     # Check Redis networks (should only be on rspamd-redis network)
-    #     redis_networks = mail.succeed("podman inspect rspamd-redis --format '{{range $k, $v := .NetworkSettings.Networks}}{{$k}} {{end}}'")
-    #     assert "mail-rspamd-redis" in redis_networks, f"Redis missing mail-rspamd-redis: {redis_networks}"
-    #     # Redis should NOT be on other networks
-    #     assert "mail-smtp" not in redis_networks, f"Redis should not be on smtp networks: {redis_networks}"
-    #     assert "mail-imap" not in redis_networks, f"Redis should not be on imap networks: {redis_networks}"
-    #     assert "mail-dovecot" not in redis_networks, f"Redis should not be on dovecot networks: {redis_networks}"
+        # Check Redis networks (should only be on rspamd-redis network)
+        redis_networks = mail.succeed("podman inspect rspamd-redis --format '{{range $k, $v := .NetworkSettings.Networks}}{{$k}} {{end}}'")
+        assert "mail-rspamd-redis" in redis_networks, f"Redis missing mail-rspamd-redis: {redis_networks}"
+        # Redis should NOT be on other networks
+        assert "mail-smtp" not in redis_networks, f"Redis should not be on smtp networks: {redis_networks}"
+        assert "mail-imap" not in redis_networks, f"Redis should not be on imap networks: {redis_networks}"
+        assert "mail-dovecot" not in redis_networks, f"Redis should not be on dovecot networks: {redis_networks}"
 
-    #     print("All containers have correct network assignments")
+        print("All containers have correct network assignments")
 
-    # # Test network isolation (negative tests only - positive connectivity is proven by mail delivery working)
-    # with subtest("Network isolation enforced"):
-    #     # Redis should only be reachable by Rspamd, not by Dovecot or OpenSMTPd
-    #     # Use bash's /dev/tcp to test port connectivity
+    # Test network isolation (negative tests only - positive connectivity is proven by mail delivery working)
+    with subtest("Network isolation enforced"):
+        # Redis should only be reachable by Rspamd, not by Dovecot or OpenSMTPd
+        # Use bash's /dev/tcp to test port connectivity
 
-    #     # Test that Dovecot CANNOT reach Redis
-    #     mail.fail("podman exec dovecot timeout 2 bash -c 'echo > /dev/tcp/redis/6379' 2>/dev/null")
-    #     print("Dovecot cannot reach Redis - OK (isolation working)")
+        # Test that Dovecot CANNOT reach Redis
+        mail.fail("podman exec dovecot timeout 2 bash -c 'echo > /dev/tcp/redis/6379' 2>/dev/null")
+        print("Dovecot cannot reach Redis - OK (isolation working)")
 
-    #     # Test that OpenSMTPd CANNOT reach Redis
-    #     mail.fail("podman exec opensmtpd timeout 2 bash -c 'echo > /dev/tcp/redis/6379' 2>/dev/null")
-    #     print("OpenSMTPd cannot reach Redis - OK (isolation working)")
+        # Test that OpenSMTPd CANNOT reach Redis
+        mail.fail("podman exec opensmtpd timeout 2 bash -c 'echo > /dev/tcp/redis/6379' 2>/dev/null")
+        print("OpenSMTPd cannot reach Redis - OK (isolation working)")
 
     # Test SMTP mail delivery
     with subtest("SMTP accepts mail and delivers via LMTP"):

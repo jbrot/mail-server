@@ -4,18 +4,6 @@
 
 { pkgs, self, ... }:
 
-let
-  # Generate a test DKIM key pair
-  # In real deployment, use rspamadm dkim_keygen
-  dkimPrivateKey = pkgs.runCommand "dkim-test-key" {
-    nativeBuildInputs = [ pkgs.openssl ];
-  } ''
-    mkdir -p $out
-    openssl genrsa -out $out/test.local.mail.key 2048
-    openssl rsa -in $out/test.local.mail.key -pubout -out $out/test.local.mail.pub
-    chmod 600 $out/test.local.mail.key
-  '';
-in
 pkgs.testers.runNixOSTest {
   name = "opensmtpd-rspamd";
 
@@ -25,6 +13,7 @@ pkgs.testers.runNixOSTest {
       ../nixos/test-network.nix
       ../nixos/opensmtpd.nix
       ../nixos/rspamd.nix
+      ../nixos/dkim.nix
     ];
 
     # === Test Certificate Generation ===
@@ -104,22 +93,12 @@ pkgs.testers.runNixOSTest {
     # Enable test network
     services.testNetwork.enable = true;
 
-    # Install DKIM test key
-    systemd.services.setup-dkim-key = {
-      description = "Install DKIM test key";
-      wantedBy = [ "multi-user.target" ];
-      before = [ "podman-rspamd.service" ];
-      serviceConfig = {
-        Type = "oneshot";
-        RemainAfterExit = true;
-      };
-      script = ''
-        mkdir -p /data/rspamd/dkim
-        cp ${dkimPrivateKey}/test.local.mail.key /data/rspamd/dkim/
-        # rspamd runs as UID 3000
-        chown -R 3000:3000 /data/rspamd
-        chmod 600 /data/rspamd/dkim/*.key
-      '';
+    # DKIM key manager (no AWS in tests)
+    services.dkimKeyManager = {
+      enable = true;
+      domain = "test.local";
+      selector = "mail";
+      route53.enable = false;
     };
 
     # Service ordering - network + dkim setup before containers
@@ -127,7 +106,7 @@ pkgs.testers.runNixOSTest {
     systemd.services.podman-rspamd.after = lib.mkForce [
       "network-online.target"
       "podman-rspamd-redis.service"
-      "setup-dkim-key.service"
+      "dkim-key-manager.service"
       "create-test-network.service"
     ];
     systemd.services.podman-opensmtpd.after = [
@@ -173,8 +152,8 @@ pkgs.testers.runNixOSTest {
         mail.succeed("test -f /data/certs/fullchain.pem")
 
     # Setup DKIM key
-    with subtest("DKIM key installed"):
-        mail.wait_for_unit("setup-dkim-key.service")
+    with subtest("DKIM key generated"):
+        mail.wait_for_unit("dkim-key-manager.service")
         mail.succeed("test -f /data/rspamd/dkim/test.local.mail.key")
 
     # Create mail directories

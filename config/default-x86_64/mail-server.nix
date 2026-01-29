@@ -19,6 +19,15 @@
     "admin" = "alice";
   };
 
+  # DKIM signing configuration
+  dkim = {
+    # Enable DKIM signing for outbound mail (default: true)
+    enable = true;
+    # DKIM selector - used in DNS record name: <selector>._domainkey.<domain>
+    # Use a dated selector (e.g., "mail2026") to allow key rotation
+    selector = "mail";
+  };
+
   # ACME certificate settings
   # Use staging server for testing (avoids rate limits, but certs aren't browser-trusted)
   acmeStaging = true;

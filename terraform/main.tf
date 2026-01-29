@@ -142,6 +142,7 @@ resource "aws_instance" "mail_server" {
   instance_type          = var.instance_type
   key_name               = aws_key_pair.mail_server.key_name
   vpc_security_group_ids = [aws_security_group.mail_server.id]
+  iam_instance_profile   = aws_iam_instance_profile.mail_server.name
 
   root_block_device {
     volume_size           = var.root_volume_size
@@ -202,4 +203,57 @@ resource "aws_route53_record" "mx" {
   type    = "MX"
   ttl     = 300
   records = ["10 ${var.hostname}."]
+}
+
+# IAM role for EC2 instance (DKIM Route53 management)
+resource "aws_iam_role" "mail_server" {
+  name = "${var.project}-mail-server"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Action = "sts:AssumeRole"
+      Effect = "Allow"
+      Principal = { Service = "ec2.amazonaws.com" }
+    }]
+  })
+}
+
+# Policy for Route53 record management (DKIM)
+# Restricted to: TXT records, _domainkey subdomains, CREATE only (no modify/delete)
+resource "aws_iam_role_policy" "route53_dkim" {
+  name = "${var.project}-route53-dkim"
+  role = aws_iam_role.mail_server.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid      = "ListRecords"
+        Effect   = "Allow"
+        Action   = "route53:ListResourceRecordSets"
+        Resource = "arn:aws:route53:::hostedzone/${local.zone_id}"
+      },
+      {
+        Sid      = "CreateDkimRecord"
+        Effect   = "Allow"
+        Action   = "route53:ChangeResourceRecordSets"
+        Resource = "arn:aws:route53:::hostedzone/${local.zone_id}"
+        Condition = {
+          "ForAllValues:StringEquals" = {
+            "route53:ChangeResourceRecordSetsRecordTypes" = ["TXT"]
+            "route53:ChangeResourceRecordSetsActions"     = ["CREATE"]
+          }
+          "ForAllValues:StringLike" = {
+            "route53:ChangeResourceRecordSetsNormalizedRecordNames" = ["*._domainkey.${var.domain}"]
+          }
+        }
+      }
+    ]
+  })
+}
+
+resource "aws_iam_instance_profile" "mail_server" {
+  name = "${var.project}-mail-server"
+  role = aws_iam_role.mail_server.name
 }

@@ -286,11 +286,20 @@ read_nix_config() {
     nix eval --raw --file "$CONFIG_FILE" "$key" 2>/dev/null || echo ""
 }
 
+# Read boolean configuration value from Nix config
+read_nix_config_bool() {
+    local key="$1"
+    nix eval --file "$CONFIG_FILE" "$key" 2>/dev/null || echo "false"
+}
+
 DOMAIN=$(read_nix_config "domain")
 HOSTNAME=$(read_nix_config "hostname")
 ARCH=$(read_nix_config "architecture")
 AWS_REGION=$(read_nix_config "aws.region")
+DKIM_ENABLE=$(read_nix_config_bool "dkim.enable")
+DKIM_SELECTOR=$(read_nix_config "dkim.selector")
 [[ -z "$ARCH" ]] && ARCH="x86_64-linux"
+[[ -z "$DKIM_SELECTOR" ]] && DKIM_SELECTOR="mail"
 
 # Convert Nix architecture to AWS architecture for display
 case "$ARCH" in
@@ -304,7 +313,7 @@ is_default_config() {
     [[ "$CONFIG_NAME" == default-* ]]
 }
 
-if is_default_config && { should_run_phase "infra" || should_run_phase "deploy"; }; then
+if is_default_config && { should_run_phase "infra" || should_run_phase "deploy" || should_run_phase "e2e"; }; then
     log_error "Cannot deploy a default config to AWS!"
     log_error "Default configs are for testing only."
     echo ""
@@ -510,6 +519,89 @@ wait_for_port() {
     return 0
 }
 
+# Escape a string for use inside IMAP double-quoted strings in a bash heredoc.
+# IMAP requires: \ -> \\, " -> \"
+imap_quote() {
+    local s="$1"
+    s="${s//\\/\\\\}"
+    s="${s//\"/\\\"}"
+    printf '%s' "$s"
+}
+
+# Shared credentials for e2e tests
+E2E_USER=""
+E2E_EMAIL=""
+E2E_PASSWORD=""
+
+# Gather and validate credentials for e2e tests
+gather_credentials() {
+    log_info "=== Gathering credentials for e2e tests ==="
+
+    # Auto-pick first user from config accounts directory
+    local accounts_dir="${PROJECT_DIR}/${CONFIG_DIR}/accounts"
+    if [[ ! -d "$accounts_dir" ]]; then
+        log_error "No accounts directory found at $accounts_dir"
+        return 1
+    fi
+
+    E2E_USER=$(ls "$accounts_dir" | head -1)
+    if [[ -z "$E2E_USER" ]]; then
+        log_error "No accounts found in $accounts_dir"
+        return 1
+    fi
+
+    E2E_EMAIL="${E2E_USER}@${DOMAIN}"
+    log_info "Using account: $E2E_EMAIL"
+
+    # Wait for IMAP service to be ready for credential validation
+    if ! wait_for_unit "podman-dovecot.service" 18; then
+        log_error "Dovecot service not ready."
+        return 1
+    fi
+    if ! wait_for_port "$HOSTNAME" 993 18; then
+        log_error "IMAP port 993 not open."
+        return 1
+    fi
+
+    # Password prompt loop (up to 3 attempts)
+    local max_pw_attempts=3
+    local pw_attempt=0
+
+    while [[ $pw_attempt -lt $max_pw_attempts ]]; do
+        ((pw_attempt++))
+        echo -n "Enter password for $E2E_EMAIL (attempt $pw_attempt/$max_pw_attempts): "
+        read -rs E2E_PASSWORD
+        echo ""
+
+        if [[ -z "$E2E_PASSWORD" ]]; then
+            log_warn "Password cannot be empty."
+            continue
+        fi
+
+        # Validate credentials via IMAP LOGIN
+        local imap_response
+        local q_user q_pass
+        q_user=$(imap_quote "$E2E_USER")
+        q_pass=$(imap_quote "$E2E_PASSWORD")
+        imap_response=$(run_openssl s_client -connect "${HOSTNAME}:993" -quiet 2>/dev/null <<IMAP_EOF
+a1 LOGIN "$q_user" "$q_pass"
+a2 LOGOUT
+IMAP_EOF
+        ) || true
+
+        if echo "$imap_response" | grep -q "a1 OK"; then
+            log_info "IMAP authentication successful."
+            return 0
+        else
+            log_warn "IMAP authentication failed."
+            E2E_PASSWORD=""
+        fi
+    done
+
+    log_error "Failed to authenticate after $max_pw_attempts attempts."
+    return 1
+}
+
 test_acme() {
     log_info "=== ACME certificate tests ==="
     local failed=0
@@ -616,24 +708,7 @@ test_acme() {
 test_mail() {
     log_info "=== Mail send/receive test ==="
 
-    # Auto-pick first user from config accounts directory
-    local accounts_dir="${PROJECT_DIR}/${CONFIG_DIR}/accounts"
-    if [[ ! -d "$accounts_dir" ]]; then
-        log_error "No accounts directory found at $accounts_dir"
-        return 1
-    fi
-
-    local first_user
-    first_user=$(ls "$accounts_dir" | head -1)
-    if [[ -z "$first_user" ]]; then
-        log_error "No accounts found in $accounts_dir"
-        return 1
-    fi
-
-    local email="${first_user}@${DOMAIN}"
-    log_info "Using account: $email"
-
-    # Wait for SMTP and IMAP services
+    # Wait for SMTP service
     if ! wait_for_unit "podman-opensmtpd.service" 18; then
         log_error "OpenSMTPd service not ready."
         return 1
@@ -642,81 +717,19 @@ test_mail() {
         log_error "SMTP submission port 587 not open."
         return 1
     fi
-    if ! wait_for_unit "podman-dovecot.service" 18; then
-        log_error "Dovecot service not ready."
-        return 1
-    fi
-    if ! wait_for_port "$HOSTNAME" 993 18; then
-        log_error "IMAP port 993 not open."
-        return 1
-    fi
-
-    # Escape a string for use inside IMAP double-quoted strings in a bash heredoc.
-    # IMAP requires: \ -> \\, " -> \"
-    # Bash heredocs also interpret \$, \`, \", \\, so we need to double-escape.
-    # Order matters: escape backslashes first, then quotes, then bash specials.
-    imap_quote() {
-        local s="$1"
-        # Escape for IMAP: \ -> \\
-        s="${s//\\/\\\\}"
-        # Escape for IMAP: " -> \"
-        s="${s//\"/\\\"}"
-        printf '%s' "$s"
-    }
-
-    # Password prompt loop (up to 3 attempts)
-    local password=""
-    local max_pw_attempts=3
-    local pw_attempt=0
-
-    while [[ $pw_attempt -lt $max_pw_attempts ]]; do
-        ((pw_attempt++))
-        echo -n "Enter password for $email (attempt $pw_attempt/$max_pw_attempts): "
-        read -rs password
-        echo ""
-
-        if [[ -z "$password" ]]; then
-            log_warn "Password cannot be empty."
-            continue
-        fi
-
-        # Validate credentials via IMAP LOGIN
-        local imap_response
-        local q_user q_pass
-        q_user=$(imap_quote "$first_user")
-        q_pass=$(imap_quote "$password")
-        imap_response=$(run_openssl s_client -connect "${HOSTNAME}:993" -quiet 2>/dev/null <<IMAP_EOF
-a1 LOGIN "$q_user" "$q_pass"
-a2 LOGOUT
-IMAP_EOF
-        ) || true
-
-        if echo "$imap_response" | grep -q "a1 OK"; then
-            log_info "IMAP authentication successful."
-            break
-        else
-            log_warn "IMAP authentication failed."
-            password=""
-        fi
-    done
-
-    if [[ -z "$password" ]]; then
-        log_error "Failed to authenticate after $max_pw_attempts attempts."
-        return 1
-    fi
 
     # Send test email via authenticated SMTP submission
     local test_subject="deploy-test-$(date +%s)"
     log_info "Sending test email with subject: $test_subject"
 
     if ! run_swaks \
-        --to "$email" \
-        --from "$email" \
+        --to "$E2E_EMAIL" \
+        --from "$E2E_EMAIL" \
         --server "$HOSTNAME" \
         --port 587 \
         -tls \
-        --auth-user "$first_user" \
-        --auth-password "$password" \
+        --auth-user "$E2E_USER" \
+        --auth-password "$E2E_PASSWORD" \
         --header "Subject: $test_subject" \
         --body "E2E test from deploy.sh"; then
         log_error "swaks SMTP send failed."
@@ -725,14 +738,14 @@ IMAP_EOF
     log_info "Test email sent."
 
     # Wait briefly for delivery
-    sleep 5
+    sleep 15
 
     # Verify receipt via IMAP
     log_info "Checking IMAP for delivered message..."
     local imap_search
     local q_user q_pass
-    q_user=$(imap_quote "$first_user")
-    q_pass=$(imap_quote "$password")
+    q_user=$(imap_quote "$E2E_USER")
+    q_pass=$(imap_quote "$E2E_PASSWORD")
     imap_search=$(run_openssl s_client -connect "${HOSTNAME}:993" -quiet 2>/dev/null <<IMAP_EOF
 a1 LOGIN "$q_user" "$q_pass"
 a2 SELECT INBOX
@@ -754,6 +767,182 @@ IMAP_EOF
     return 0
 }
 
+test_dkim() {
+    log_info "=== DKIM verification tests ==="
+
+    if [[ "$DKIM_ENABLE" != "true" ]]; then
+        log_info "DKIM is disabled in config, skipping DKIM tests."
+        return 0
+    fi
+
+    local dkim_record="${DKIM_SELECTOR}._domainkey.${DOMAIN}"
+    local failed=0
+
+    # Wait for DKIM key manager service
+    log_info "Checking DKIM key manager service..."
+    if ! wait_for_unit "dkim-key-manager.service" 30; then
+        log_error "DKIM key manager service failed."
+        return 1
+    fi
+
+    # Verify DKIM key files exist
+    log_info "Checking DKIM key files..."
+    if ! ssh $SSH_OPTS "root@${INSTANCE_IP}" "test -f /data/rspamd/dkim/${DOMAIN}.${DKIM_SELECTOR}.key" 2>/dev/null; then
+        log_error "DKIM private key not found at /data/rspamd/dkim/${DOMAIN}.${DKIM_SELECTOR}.key"
+        return 1
+    fi
+    if ! ssh $SSH_OPTS "root@${INSTANCE_IP}" "test -f /data/rspamd/dkim/${DOMAIN}.${DKIM_SELECTOR}.txt" 2>/dev/null; then
+        log_error "DKIM TXT record file not found at /data/rspamd/dkim/${DOMAIN}.${DKIM_SELECTOR}.txt"
+        return 1
+    fi
+    log_info "DKIM key files exist."
+
+    # Check DNS for DKIM TXT record (with retries for propagation)
+    log_info "Checking DNS for DKIM TXT record: $dkim_record"
+    local dns_ok=false
+    local dns_attempts=18
+    local txt_value=""
+    for ((i=1; i<=dns_attempts; i++)); do
+        txt_value=$(run_dig +short TXT "$dkim_record" @8.8.8.8 2>/dev/null | tr -d '"' || echo "")
+        if [[ -n "$txt_value" ]]; then
+            dns_ok=true
+            break
+        fi
+        echo -ne "\r${BLUE}[WAIT]${NC} DNS TXT record not found yet (attempt $i/$dns_attempts)...    "
+        sleep 10
+    done
+    echo ""
+
+    if $dns_ok; then
+        log_info "DKIM DNS record found: $dkim_record"
+        log_verbose "TXT value: $txt_value"
+    else
+        log_error "DKIM DNS record not found: $dkim_record"
+        log_error "Expected Route53 to have created the TXT record automatically."
+        return 1
+    fi
+
+    # Verify TXT record format
+    log_info "Validating DKIM TXT record format..."
+    if ! echo "$txt_value" | grep -q "v=DKIM1"; then
+        log_error "DKIM TXT record missing 'v=DKIM1'"
+        failed=1
+    fi
+    if ! echo "$txt_value" | grep -q "k=rsa"; then
+        log_error "DKIM TXT record missing 'k=rsa'"
+        failed=1
+    fi
+    if ! echo "$txt_value" | grep -q "p="; then
+        log_error "DKIM TXT record missing public key 'p='"
+        failed=1
+    fi
+    if [[ $failed -eq 0 ]]; then
+        log_info "DKIM TXT record format is valid."
+    fi
+
+    # Send test email and verify DKIM signature
+    log_info "Sending test email to verify DKIM signature..."
+
+    # Wait for services
+    if ! wait_for_unit "podman-opensmtpd.service" 18; then
+        log_error "OpenSMTPd service not ready."
+        return 1
+    fi
+    if ! wait_for_unit "podman-rspamd.service" 18; then
+        log_error "Rspamd service not ready."
+        return 1
+    fi
+
+    # Send authenticated email
+    local test_subject="dkim-test-$(date +%s)"
+    log_info "Sending DKIM test email with subject: $test_subject"
+
+    if ! run_swaks \
+        --to "$E2E_EMAIL" \
+        --from "$E2E_EMAIL" \
+        --server "$HOSTNAME" \
+        --port 587 \
+        -tls \
+        --auth-user "$E2E_USER" \
+        --auth-password "$E2E_PASSWORD" \
+        --header "Subject: $test_subject" \
+        --body "DKIM signature test from deploy.sh"; then
+        log_error "swaks SMTP send failed."
+        return 1
+    fi
+
+    # Wait for delivery
+    sleep 15
+
+    # Fetch the message via IMAP and check for DKIM signature
+    log_info "Fetching message to verify DKIM signature..."
+
+    local q_user q_pass
+    q_user=$(imap_quote "$E2E_USER")
+    q_pass=$(imap_quote "$E2E_PASSWORD")
+
+    # Search for the message and get its UID
+    local imap_search
+    imap_search=$(run_openssl s_client -connect "${HOSTNAME}:993" -quiet 2>/dev/null <<IMAP_EOF
+a1 LOGIN "$q_user" "$q_pass"
+a2 SELECT INBOX
+a3 SEARCH SUBJECT "$test_subject"
+a4 LOGOUT
+IMAP_EOF
+    ) || true
+
+    local msg_uid
+    msg_uid=$(echo "$imap_search" | tr -d '\r' | grep "^\* SEARCH" | sed 's/\* SEARCH //' | awk '{print $1}')
+
+    if [[ -z "$msg_uid" ]]; then
+        log_error "Could not find test message in INBOX."
+        return 1
+    fi
+
+    log_verbose "Fetching message UID: $msg_uid"
+
+    # Fetch the message headers
+    local msg_headers
+    msg_headers=$(run_openssl s_client -connect "${HOSTNAME}:993" -quiet 2>/dev/null <<IMAP_EOF
+a1 LOGIN "$q_user" "$q_pass"
+a2 SELECT INBOX
+a3 FETCH ${msg_uid} BODY[HEADER]
+a4 LOGOUT
+IMAP_EOF
+    ) || true
+
+    # Check for DKIM-Signature header
+    if echo "$msg_headers" | grep -q "DKIM-Signature:"; then
+        log_info "DKIM-Signature header found in message."
+    else
+        log_error "DKIM-Signature header NOT found in message."
+        log_error "Message headers:"
+        echo "$msg_headers" | head -50
+        return 1
+    fi
+
+    # Verify DKIM signature contains correct domain and selector
+    if echo "$msg_headers" | grep -q "d=${DOMAIN}"; then
+        log_info "DKIM signature has correct domain: d=${DOMAIN}"
+    else
+        log_error "DKIM signature missing correct domain (d=${DOMAIN})"
+        failed=1
+    fi
+
+    if echo "$msg_headers" | grep -q "s=${DKIM_SELECTOR}"; then
+        log_info "DKIM signature has correct selector: s=${DKIM_SELECTOR}"
+    else
+        log_error "DKIM signature missing correct selector (s=${DKIM_SELECTOR})"
+        failed=1
+    fi
+
+    if [[ $failed -eq 0 ]]; then
+        log_info "DKIM verification tests passed!"
+    fi
+
+    return $failed
+}
+
 phase_e2e() {
     log_step "Phase: e2e"
     setup_ssh
@@ -761,7 +950,15 @@ phase_e2e() {
     local failed=0
 
     test_acme || failed=1
+
+    # Gather credentials once for mail and DKIM tests
+    if ! gather_credentials; then
+        log_error "Failed to gather credentials, skipping mail and DKIM tests."
+        exit 1
+    fi
+
     test_mail || failed=1
+    test_dkim || failed=1
 
     # Summary
     if [[ $failed -eq 0 ]]; then
@@ -817,17 +1014,3 @@ fi
 
 echo ""
 log_info "Deployment complete!"
-
-if should_run_phase "deploy"; then
-    INSTANCE_IP=$(run_terraform -chdir="$TERRAFORM_DIR" output -raw instance_public_ip 2>/dev/null || echo "<IP>")
-    echo ""
-    echo "Next steps:"
-    echo "  1. Wait for ACME certificate (~5 min after boot)"
-    echo "     ssh root@${INSTANCE_IP} 'systemctl status acme-${HOSTNAME}'"
-    echo ""
-    echo "  2. Generate DKIM key and add DNS record"
-    echo "     ssh root@${INSTANCE_IP} 'rspamadm dkim_keygen -s mail -d ${DOMAIN}'"
-    echo ""
-    echo "  3. Test mail delivery"
-    echo "     swaks --to test@${DOMAIN} --server ${INSTANCE_IP}"
-fi
