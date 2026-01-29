@@ -470,7 +470,10 @@ in
     systemd.services.podman-rspamd = {
       after = [ "network-online.target" "podman-rspamd-redis.service" ];
       requires = [ "podman-rspamd-redis.service" ];
-      restartTriggers = [ cfg.image ];
+      restartTriggers = [ cfg.image ] ++
+        # Restart when any /etc/rspamd/* config file changes
+        (lib.mapAttrsToList (_: entry: entry.source)
+          (lib.filterAttrs (name: _: lib.hasPrefix "rspamd/" name) config.environment.etc));
       serviceConfig = {
         Restart = "always";
         RestartSec = "10s";

@@ -386,7 +386,10 @@ in
     # Container service configuration
     systemd.services.podman-dovecot = {
       after = [ "network-online.target" ];
-      restartTriggers = [ cfg.image ];
+      restartTriggers = [ cfg.image ] ++
+        # Restart when any /etc/dovecot/* config file changes
+        (lib.mapAttrsToList (_: entry: entry.source)
+          (lib.filterAttrs (name: _: lib.hasPrefix "dovecot/" name) config.environment.etc));
       serviceConfig = {
         Restart = "always";
         RestartSec = "10s";

@@ -242,7 +242,10 @@ in
     # Container service configuration
     systemd.services.podman-opensmtpd = {
       after = [ "network-online.target" ];
-      restartTriggers = [ cfg.image ];
+      restartTriggers = [ cfg.image ] ++
+        # Restart when any /etc/smtpd/* config file changes
+        (lib.mapAttrsToList (_: entry: entry.source)
+          (lib.filterAttrs (name: _: lib.hasPrefix "smtpd/" name) config.environment.etc));
       serviceConfig = {
         Restart = "always";
         RestartSec = "10s";
