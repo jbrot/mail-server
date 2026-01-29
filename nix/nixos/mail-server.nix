@@ -108,9 +108,11 @@ in
   };
 
   config = lib.mkIf cfg.enable {
-    # mail-networks.nix creates 7 isolated networks:
-    # - External: mail-smtp-external, mail-imap-external, mail-rspamd-external
-    # - Internal: mail-smtp-rspamd, mail-smtp-lmtp, mail-rspamd-redis, mail-dovecot-rspamd
+    # mail-networks.nix creates 5 isolated networks:
+    # - External: mail-smtp-external (OpenSMTPd - full internet for mail delivery)
+    # - Filtered: mail-rspamd-external (Rspamd - DNS + rspamd.com only via nftables)
+    #             mail-imap-external (Dovecot - inbound only, no egress via nftables)
+    # - Internal: mail-internal (OpenSMTPd/Dovecot/Rspamd), mail-rspamd-redis (Rspamd/Redis)
 
     # === DKIM Key Manager ===
     services.dkimKeyManager = {
@@ -144,8 +146,8 @@ in
         };
       };
 
-      # Network: rspamd-external (RBL lookups), smtp-rspamd (milter), rspamd-redis, dovecot-rspamd (learning)
-      networking.networks = [ "mail-rspamd-external" "mail-smtp-rspamd" "mail-rspamd-redis" "mail-dovecot-rspamd" ];
+      # Network: rspamd-external (filtered egress), internal (milter/learning), rspamd-redis
+      networking.networks = [ "mail-rspamd-external" "mail-internal" "mail-rspamd-redis" ];
       redis.networking.networks = [ "mail-rspamd-redis" ];
     };
 
@@ -160,8 +162,8 @@ in
       # Enable rspamd integration for spam/ham learning via imap_sieve
       rspamd.enable = true;
 
-      # Network: imap-external (client access), smtp-lmtp (delivery), dovecot-rspamd (learning)
-      networking.networks = [ "mail-imap-external" "mail-smtp-lmtp" "mail-dovecot-rspamd" ];
+      # Network: imap-external (port publishing, egress blocked), internal (LMTP delivery, spam learning)
+      networking.networks = [ "mail-imap-external" "mail-internal" ];
       networking.publishPorts = [ "993:993" "143:143" ];
     };
 
@@ -185,18 +187,30 @@ in
       # DNS filters (rDNS/FCrDNS) - configurable for environments without proper DNS
       enableDnsFilters = cfg.enableDnsFilters;
 
-      # Network: smtp-external (inbound/outbound), smtp-rspamd (filtering), smtp-lmtp (delivery)
-      networking.networks = [ "mail-smtp-external" "mail-smtp-rspamd" "mail-smtp-lmtp" ];
+      # Network: smtp-external (inbound/outbound mail), internal (rspamd filtering, LMTP delivery)
+      networking.networks = [ "mail-smtp-external" "mail-internal" ];
       networking.publishPorts = [ "25:25" "587:587" ];
     };
 
     # === Service Ordering ===
     # DKIM key manager runs first, then Redis, then rspamd, then dovecot, then opensmtpd
-    # All containers depend on mail-network-setup
-    systemd.services.podman-rspamd-redis.after = [ "mail-network-setup.service" ];
-    systemd.services.podman-rspamd.after = [ "podman-rspamd-redis.service" "mail-network-setup.service" "dkim-key-manager.service" ];
-    systemd.services.podman-dovecot.after = [ "podman-rspamd.service" "mail-network-setup.service" ];
-    systemd.services.podman-opensmtpd.after = [ "podman-dovecot.service" "podman-rspamd.service" "mail-network-setup.service" ];
+    # All containers depend on mail-network-setup and restart when it restarts (via PartOf)
+    systemd.services.podman-rspamd-redis = {
+      after = [ "mail-network-setup.service" ];
+      partOf = [ "mail-network-setup.service" ];
+    };
+    systemd.services.podman-rspamd = {
+      after = [ "podman-rspamd-redis.service" "mail-network-setup.service" "dkim-key-manager.service" ];
+      partOf = [ "mail-network-setup.service" ];
+    };
+    systemd.services.podman-dovecot = {
+      after = [ "podman-rspamd.service" "mail-network-setup.service" ];
+      partOf = [ "mail-network-setup.service" ];
+    };
+    systemd.services.podman-opensmtpd = {
+      after = [ "podman-dovecot.service" "podman-rspamd.service" "mail-network-setup.service" ];
+      partOf = [ "mail-network-setup.service" ];
+    };
 
     # === Data Directories ===
     # UIDs: vmail=5000, rspamd=3000, redis=4000 (unique per service for isolation)

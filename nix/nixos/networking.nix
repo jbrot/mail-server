@@ -10,27 +10,53 @@
   # Enable networking
   networking.useDHCP = true;
 
-  # Firewall configuration
-  networking.firewall = {
-    enable = true;
+  # Disable NixOS firewall - we use custom nftables rules for fine-grained control
+  # This allows us to distinguish between container->host and external->host traffic
+  networking.firewall.enable = false;
 
-    # Allow incoming connections on mail-related ports
-    allowedTCPPorts = [
-      22    # SSH
-      25    # SMTP
-      80    # HTTP (ACME challenges)
-      443   # HTTPS (optional)
-      465   # SMTPS
-      587   # SMTP Submission
-      993   # IMAPS
-      19999 # Netdata (restrict in production via security group)
-    ];
+  # Custom firewall using nftables
+  # Provides fine-grained control over traffic flows:
+  # - Container -> Host: DNS only (for aardvark-dns)
+  # - External -> Host: SSH, HTTP (ACME), Netdata
+  # - External -> Container: Allowed (only published ports are routable via Podman NAT)
+  # - Container egress: Filtered per-container in mail-networks.nix (imap-egress, rspamd-egress)
+  networking.nftables.enable = true;
+  networking.nftables.tables.host-firewall = {
+    family = "inet";
+    content = ''
+      chain input {
+        type filter hook input priority 0; policy drop;
 
-    # Rate limiting for SMTP
-    extraCommands = ''
-      # Rate limit new SMTP connections
-      iptables -A INPUT -p tcp --dport 25 -m state --state NEW -m recent --set
-      iptables -A INPUT -p tcp --dport 25 -m state --state NEW -m recent --update --seconds 60 --hitcount 20 -j DROP
+        # Allow established/related connections
+        ct state established,related accept
+
+        # Allow loopback
+        iif lo accept
+
+        # === Container -> Host ===
+        # Only allow DNS (required for Podman's aardvark-dns)
+        # All container DNS resolution goes through the host
+        iifname "podman*" udp dport 53 accept
+        iifname "podman*" tcp dport 53 accept
+        # Block all other container -> host traffic
+        iifname "podman*" drop
+
+        # === External -> Host (services running on host, not in containers) ===
+        # ICMP (ping, etc.)
+        ip protocol icmp accept
+        ip6 nexthdr icmpv6 accept
+
+        # SSH
+        tcp dport 22 accept
+
+        # HTTP (ACME challenges)
+        tcp dport 80 accept
+
+        # Netdata (restrict in production via security group)
+        tcp dport 19999 accept
+
+        # Everything else dropped by policy
+      }
     '';
   };
 

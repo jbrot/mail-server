@@ -7,11 +7,36 @@
 pkgs.testers.runNixOSTest {
   name = "mail-server-integration";
 
+  # Second VM acting as "the internet" - external client for testing
+  nodes.internet = { config, pkgs, ... }: {
+    networking.firewall.allowedTCPPorts = [ 80 ];
+
+    # Simple HTTP server to test connectivity
+    services.nginx = {
+      enable = true;
+      virtualHosts.default = {
+        default = true;
+        locations."/".return = "200 'Hello from the internet'";
+      };
+    };
+
+    # Install test utilities for sending mail and checking IMAP
+    environment.systemPackages = with pkgs; [
+      swaks       # For sending test emails
+      openssl     # For IMAP/TLS testing
+      curl        # General HTTP testing
+    ];
+  };
+
   nodes.mail = { config, pkgs, lib, ... }: {
     imports = [
       ../nixos/test-certs.nix
       ../nixos/mail-server.nix
+      ../nixos/networking.nix
     ];
+
+    # Override AWS-specific settings from networking.nix for VM tests
+    networking.useDHCP = lib.mkForce false;
 
     # Explicit image paths for tests
     services.mailServer.images = {
@@ -84,9 +109,6 @@ pkgs.testers.runNixOSTest {
       options = [ "mode=0755" "size=512M" ];
     };
 
-    # Disable firewall for testing
-    networking.firewall.enable = false;
-
     # Use dnsmasq as local DNS server (fast-failing, no internet in VM tests)
     services.dnsmasq = {
       enable = true;
@@ -107,10 +129,9 @@ pkgs.testers.runNixOSTest {
     # Set hostname
     networking.hostName = "mail";
 
-    # Install test utilities
+    # Install test utilities (mail sending/IMAP tools are on the internet node)
     environment.systemPackages = with pkgs; [
       curl
-      swaks
     ];
 
     # VM resources
@@ -125,21 +146,35 @@ pkgs.testers.runNixOSTest {
   testScript = ''
     import time
 
+    # Start both VMs
+    internet.start()
     mail.start()
+
+    internet.wait_for_unit("nginx.service")
     mail.wait_for_unit("multi-user.target")
+
+    # Get IP addresses on the inter-VM network (eth1)
+    # eth0 is QEMU's NAT (10.0.2.x), eth1 is the test network
+    internet_ip = internet.succeed("ip -4 addr show eth1 | grep -oP '(?<=inet\\s)\\d+(\\.\\d+){3}'").strip()
+    mail_ip = mail.succeed("ip -4 addr show eth1 | grep -oP '(?<=inet\\s)\\d+(\\.\\d+){3}'").strip()
+    print(f"Internet VM IP (eth1): {internet_ip}")
+    print(f"Mail VM IP (eth1): {mail_ip}")
+
+    # Verify host-level connectivity between VMs
+    mail.succeed(f"ping -c1 -W2 {internet_ip}")
+    internet.succeed(f"ping -c1 -W2 {mail_ip}")
+    print("VMs can reach each other - OK")
 
     # Wait for network setup
     with subtest("Network isolation setup"):
         mail.wait_for_unit("mail-network-setup.service")
-        # Verify all 7 networks were created
+        # Verify all 5 networks were created
         mail.succeed("podman network exists mail-smtp-external")
-        mail.succeed("podman network exists mail-imap-external")
         mail.succeed("podman network exists mail-rspamd-external")
-        mail.succeed("podman network exists mail-smtp-rspamd")
-        mail.succeed("podman network exists mail-smtp-lmtp")
+        mail.succeed("podman network exists mail-imap-external")
+        mail.succeed("podman network exists mail-internal")
         mail.succeed("podman network exists mail-rspamd-redis")
-        mail.succeed("podman network exists mail-dovecot-rspamd")
-        print("All 7 networks created successfully")
+        print("All 5 networks created successfully")
 
     # Wait for certificate generation
     with subtest("Certificates generated"):
@@ -185,57 +220,113 @@ pkgs.testers.runNixOSTest {
         # Check OpenSMTPd networks
         smtp_networks = mail.succeed("podman inspect opensmtpd --format '{{range $k, $v := .NetworkSettings.Networks}}{{$k}} {{end}}'")
         assert "mail-smtp-external" in smtp_networks, f"OpenSMTPd missing mail-smtp-external: {smtp_networks}"
-        assert "mail-smtp-rspamd" in smtp_networks, f"OpenSMTPd missing mail-smtp-rspamd: {smtp_networks}"
-        assert "mail-smtp-lmtp" in smtp_networks, f"OpenSMTPd missing mail-smtp-lmtp: {smtp_networks}"
+        assert "mail-internal" in smtp_networks, f"OpenSMTPd missing mail-internal: {smtp_networks}"
 
-        # Check Dovecot networks
+        # Check Dovecot networks (imap-external for port publishing, internal for LMTP)
         dovecot_networks = mail.succeed("podman inspect dovecot --format '{{range $k, $v := .NetworkSettings.Networks}}{{$k}} {{end}}'")
         assert "mail-imap-external" in dovecot_networks, f"Dovecot missing mail-imap-external: {dovecot_networks}"
-        assert "mail-smtp-lmtp" in dovecot_networks, f"Dovecot missing mail-smtp-lmtp: {dovecot_networks}"
-        assert "mail-dovecot-rspamd" in dovecot_networks, f"Dovecot missing mail-dovecot-rspamd: {dovecot_networks}"
+        assert "mail-internal" in dovecot_networks, f"Dovecot missing mail-internal: {dovecot_networks}"
 
         # Check Rspamd networks
         rspamd_networks = mail.succeed("podman inspect rspamd --format '{{range $k, $v := .NetworkSettings.Networks}}{{$k}} {{end}}'")
         assert "mail-rspamd-external" in rspamd_networks, f"Rspamd missing mail-rspamd-external: {rspamd_networks}"
-        assert "mail-smtp-rspamd" in rspamd_networks, f"Rspamd missing mail-smtp-rspamd: {rspamd_networks}"
+        assert "mail-internal" in rspamd_networks, f"Rspamd missing mail-internal: {rspamd_networks}"
         assert "mail-rspamd-redis" in rspamd_networks, f"Rspamd missing mail-rspamd-redis: {rspamd_networks}"
-        assert "mail-dovecot-rspamd" in rspamd_networks, f"Rspamd missing mail-dovecot-rspamd: {rspamd_networks}"
 
         # Check Redis networks (should only be on rspamd-redis network)
         redis_networks = mail.succeed("podman inspect rspamd-redis --format '{{range $k, $v := .NetworkSettings.Networks}}{{$k}} {{end}}'")
         assert "mail-rspamd-redis" in redis_networks, f"Redis missing mail-rspamd-redis: {redis_networks}"
         # Redis should NOT be on other networks
-        assert "mail-smtp" not in redis_networks, f"Redis should not be on smtp networks: {redis_networks}"
-        assert "mail-imap" not in redis_networks, f"Redis should not be on imap networks: {redis_networks}"
-        assert "mail-dovecot" not in redis_networks, f"Redis should not be on dovecot networks: {redis_networks}"
+        assert "mail-internal" not in redis_networks, f"Redis should not be on mail-internal: {redis_networks}"
+        assert "mail-smtp-external" not in redis_networks, f"Redis should not be on mail-smtp-external: {redis_networks}"
 
         print("All containers have correct network assignments")
 
-    # Test network isolation (negative tests only - positive connectivity is proven by mail delivery working)
+    # Test network isolation
     with subtest("Network isolation enforced"):
         # Redis should only be reachable by Rspamd, not by Dovecot or OpenSMTPd
         # Use bash's /dev/tcp to test port connectivity
 
-        # Test that Dovecot CANNOT reach Redis
-        mail.fail("podman exec dovecot timeout 2 bash -c 'echo > /dev/tcp/redis/6379' 2>/dev/null")
+        # Positive test: Rspamd CAN reach Redis (verifies the command works)
+        mail.succeed("podman exec rspamd timeout 2 bash -c 'echo > /dev/tcp/rspamd-redis/6379'")
+        print("Rspamd can reach Redis - OK (command works)")
+
+        # Negative test: Dovecot CANNOT reach Redis
+        mail.fail("podman exec dovecot timeout 2 bash -c 'echo > /dev/tcp/rspamd-redis/6379' 2>/dev/null")
         print("Dovecot cannot reach Redis - OK (isolation working)")
 
-        # Test that OpenSMTPd CANNOT reach Redis
-        mail.fail("podman exec opensmtpd timeout 2 bash -c 'echo > /dev/tcp/redis/6379' 2>/dev/null")
+        # Negative test: OpenSMTPd CANNOT reach Redis
+        mail.fail("podman exec opensmtpd timeout 2 bash -c 'echo > /dev/tcp/rspamd-redis/6379' 2>/dev/null")
         print("OpenSMTPd cannot reach Redis - OK (isolation working)")
 
-    # Test SMTP mail delivery
-    with subtest("SMTP accepts mail and delivers via LMTP"):
-        # Send test email via swaks (directly to port 25, no auth needed for inbound)
-        mail.succeed(
-            "swaks "
-            "--to testuser@test.local "
-            "--from sender@external.com "
-            "--server localhost "
-            "--port 25 "
-            "--timeout 30 "
-            "--header 'Subject: Test Email from External' "
-            "--body 'This is a test message delivered through the full stack.'"
+    # Test egress using the internet VM (HTTP request to port 80)
+    # Uses bash's /dev/tcp to make HTTP requests without requiring curl/wget
+    with subtest("OpenSMTPd can reach internet"):
+        # Positive test: OpenSMTPd should be able to reach the internet VM and get response
+        http_cmd = f"exec 3<>/dev/tcp/{internet_ip}/80; echo -e 'GET / HTTP/1.0\\r\\nHost: {internet_ip}\\r\\n\\r\\n' >&3; cat <&3; exec 3>&-"
+        result = mail.succeed(f"podman exec opensmtpd timeout 5 bash -c \"{http_cmd}\"")
+        assert "Hello from the internet" in result, f"Expected greeting not found in response: {result}"
+        print("OpenSMTPd can reach internet and got expected response - OK")
+
+    with subtest("Dovecot cannot reach internet"):
+        # Dovecot is on imap-external network (for port publishing) but egress is blocked via nftables
+        mail.fail(f"podman exec dovecot timeout 3 bash -c 'echo > /dev/tcp/{internet_ip}/80'")
+        print("Dovecot egress blocked via nftables - OK")
+
+    with subtest("Redis cannot reach internet"):
+        # Redis is on internal network, should not reach external IPs
+        mail.fail(f"podman exec rspamd-redis timeout 3 bash -c 'echo > /dev/tcp/{internet_ip}/80'")
+        print("Redis egress blocked - OK")
+
+    # Test nftables rules are correctly configured
+    with subtest("nftables egress filtering configured"):
+        # Verify imap-egress table blocks Dovecot egress
+        imap_rules = mail.succeed("nft list table inet imap-egress")
+        assert "imap-egress-blocked" in imap_rules, "imap-egress log prefix missing"
+        assert "drop" in imap_rules, "drop rule missing"
+        print("imap-egress rules configured correctly")
+
+        # Verify rspamd-egress table has the filter chain with correct rules
+        rspamd_rules = mail.succeed("nft list table inet rspamd-egress")
+        assert "rspamd_filter" in rspamd_rules, "rspamd_filter chain missing"
+        assert "dport 53 accept" in rspamd_rules, "DNS allow rule missing"
+        assert "11335" in rspamd_rules, "fuzzy hash port 11335 missing"
+        assert "drop" in rspamd_rules, "drop rule missing"
+        print("rspamd-egress rules configured correctly")
+
+        # Verify host-firewall table handles container->host and external->host traffic
+        firewall_rules = mail.succeed("nft list table inet host-firewall")
+        assert 'iifname "podman*"' in firewall_rules, "podman interface match missing"
+        assert "dport 53 accept" in firewall_rules, "DNS allow rule missing"
+        assert "dport 22 accept" in firewall_rules, "SSH allow rule missing"
+        assert "policy drop" in firewall_rules, "default drop policy missing"
+        print("host-firewall rules configured correctly")
+
+    # Test container-to-host blocking (except DNS)
+    with subtest("Containers cannot reach host services"):
+        # Get the gateway IP from podman network inspect (the host's IP on the container network)
+        gateway = mail.succeed("podman network inspect mail-internal --format '{{(index .Subnets 0).Gateway}}'").strip()
+        print(f"Container gateway: {gateway}")
+
+        # Note: DNS (port 53) is allowed by nftables rules - this is tested implicitly by
+        # mail delivery working (containers must resolve each other via aardvark-dns)
+
+        # Negative test: Container cannot reach host SSH (port 22)
+        mail.fail(f"podman exec dovecot timeout 2 bash -c 'echo > /dev/tcp/{gateway}/22'")
+        print(f"Dovecot blocked from host SSH ({gateway}:22) - OK")
+
+    # Test SMTP mail delivery from external client (internet VM)
+    with subtest("SMTP accepts mail from external client"):
+        # Send test email via swaks from internet VM (simulates external sender)
+        internet.succeed(
+            f"swaks "
+            f"--to testuser@test.local "
+            f"--from sender@external.com "
+            f"--server {mail_ip} "
+            f"--port 25 "
+            f"--timeout 30 "
+            f"--header 'Subject: Test Email from External' "
+            f"--body 'This is a test message delivered through the full stack.'"
         )
 
         # Allow time for delivery through rspamd -> LMTP -> dovecot
@@ -246,22 +337,22 @@ pkgs.testers.runNixOSTest {
         assert result.strip() != "empty", "No mail found in testuser's mailbox"
         print(f"Mail delivered successfully: {result}")
 
-    # Test full e2e spam filtering: SMTP -> rspamd -> LMTP -> Junk
-    with subtest("E2E: Spam email via SMTP delivered to Junk folder"):
+    # Test full e2e spam filtering from external client: SMTP -> rspamd -> LMTP -> Junk
+    with subtest("E2E: Spam email from external client delivered to Junk folder"):
         # Clear Junk folder
         mail.succeed("rm -f /data/mail/testuser/.Junk/new/* /data/mail/testuser/.Junk/cur/* 2>/dev/null || true")
 
-        # Send email with TEST_SPAM_MARKER subject via SMTP
+        # Send email with TEST_SPAM_MARKER subject via SMTP from internet VM
         # This should trigger the custom rspamd rule (score=10) -> X-Spam: Yes -> sieve -> Junk
-        mail.succeed(
-            "swaks "
-            "--to testuser@test.local "
-            "--from spammer@example.com "
-            "--server localhost "
-            "--port 25 "
-            "--timeout 30 "
-            "--header 'Subject: TEST_SPAM_MARKER obvious spam' "
-            "--body 'This spam message should be delivered to Junk via the full pipeline. TEST_SPAM_MARKER'"
+        internet.succeed(
+            f"swaks "
+            f"--to testuser@test.local "
+            f"--from spammer@example.com "
+            f"--server {mail_ip} "
+            f"--port 25 "
+            f"--timeout 30 "
+            f"--header 'Subject: TEST_SPAM_MARKER obvious spam' "
+            f"--body 'This spam message should be delivered to Junk via the full pipeline. TEST_SPAM_MARKER'"
         )
 
         # Wait for delivery through the full pipeline
@@ -277,13 +368,35 @@ pkgs.testers.runNixOSTest {
             f"X-Spam header not found in message: {junk_content[:500]}"
         print("SUCCESS: E2E spam filtering works - message delivered to Junk with X-Spam header")
 
+    # Test IMAP accessibility from external client
+    with subtest("IMAP accessible from external client"):
+        # Test IMAPS (port 993) - login and list mailboxes
+        # Using curl with IMAP support, -k to accept self-signed test certs
+        imap_result = internet.succeed(
+            f"curl -k --user testuser:testpass 'imaps://{mail_ip}/INBOX' 2>&1"
+        )
+        print(f"IMAP INBOX response: {imap_result[:500]}")
+
+        # Test basic IMAP connectivity on port 143
+        internet.succeed(f"timeout 5 bash -c 'echo > /dev/tcp/{mail_ip}/143'")
+        print("IMAP port 143 reachable from external client")
+
+        # Test IMAPS connectivity on port 993
+        internet.succeed(f"timeout 5 bash -c 'echo > /dev/tcp/{mail_ip}/993'")
+        print("IMAPS port 993 reachable from external client")
+
     # Final status check
     with subtest("All services healthy"):
+        # Show all containers for diagnostics
+        containers = mail.succeed("podman ps -a --format '{{.Names}} {{.Status}}'")
+        print(f"Container status:\n{containers}")
+
         # Check container status
-        mail.succeed("podman ps | grep -q rspamd-redis")
-        mail.succeed("podman ps | grep -q rspamd")
-        mail.succeed("podman ps | grep -q dovecot")
-        mail.succeed("podman ps | grep -q opensmtpd")
+        assert "rspamd-redis" in mail.succeed("podman ps --format '{{.Names}}'"), "rspamd-redis not running"
+        assert "rspamd" in mail.succeed("podman ps --format '{{.Names}}'"), "rspamd not running"
+        assert "dovecot" in mail.succeed("podman ps --format '{{.Names}}'"), "dovecot not running"
+        assert "opensmtpd" in mail.succeed("podman ps --format '{{.Names}}'"), "opensmtpd not running"
+        print("All containers healthy")
 
     print("Full mail server integration test passed!")
   '';
