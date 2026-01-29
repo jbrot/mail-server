@@ -9,8 +9,12 @@ pkgs.testers.runNixOSTest {
   nodes.mail = { config, pkgs, lib, ... }: {
     imports = [
       ../nixos/test-certs.nix
+      ../nixos/test-network.nix
       ../nixos/dovecot.nix
     ];
+
+    # Enable test network
+    services.testNetwork.enable = true;
 
     # === Test Certificate Generation ===
     services.testCerts = {
@@ -32,14 +36,13 @@ pkgs.testers.runNixOSTest {
 
       enableLmtp = true;
 
-      # Use host network to avoid netavark bridge restart issues
-      # See: https://github.com/containers/podman/issues/27516
-      networking.networks = [ "host" ];
-      networking.publishPorts = [ ];  # Not needed with host networking
+      # Use isolated network
+      networking.networks = [ "test-net" ];
+      networking.publishPorts = [ "143:143" "993:993" "24:24" ];
     };
 
-    # Ensure certs are ready before Dovecot starts
-    systemd.services.podman-dovecot.after = [ "generate-test-certs.service" ];
+    # Service ordering: certs + network -> dovecot
+    systemd.services.podman-dovecot.after = [ "generate-test-certs.service" "create-test-network.service" ];
 
     # Use tmpfs for /data
     fileSystems."/data" = {

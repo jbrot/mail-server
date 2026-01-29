@@ -9,6 +9,7 @@ pkgs.testers.runNixOSTest {
   nodes.mail = { config, pkgs, lib, ... }: {
     imports = [
       ../nixos/test-certs.nix
+      ../nixos/test-network.nix
       ../nixos/opensmtpd.nix
     ];
 
@@ -41,14 +42,16 @@ pkgs.testers.runNixOSTest {
         "" = "alice";  # Catchall
       };
 
-      # Use host network to avoid netavark bridge restart issues
-      # See: https://github.com/containers/podman/issues/27516
-      networking.networks = [ "host" ];
-      networking.publishPorts = [ ];  # Not needed with host networking
+      # Use isolated network
+      networking.networks = [ "test-net" ];
+      networking.publishPorts = [ "25:25" "587:587" ];
     };
 
-    # Ensure certs are ready before container
-    systemd.services.podman-opensmtpd.after = [ "generate-test-certs.service" ];
+    # Enable test network
+    services.testNetwork.enable = true;
+
+    # Service ordering: certs + network -> opensmtpd
+    systemd.services.podman-opensmtpd.after = [ "generate-test-certs.service" "create-test-network.service" ];
 
     # Use tmpfs for /data
     fileSystems."/data" = {
@@ -60,8 +63,8 @@ pkgs.testers.runNixOSTest {
     # Disable firewall for testing
     networking.firewall.enable = false;
 
-    # Fast-failing DNS (no internet in VM tests)
-    networking.nameservers = lib.mkForce [ "127.0.0.1" ];
+    # Use localhost DNS to prevent DNS lookup hangs
+    networking.nameservers = [ "127.0.0.1" ];
 
     # Set hostname
     networking.hostName = "mail";
@@ -99,7 +102,6 @@ pkgs.testers.runNixOSTest {
         mail.wait_for_open_port(25, timeout=60)
         mail.wait_for_open_port(587, timeout=60)
 
-    # Test SMTP delivery to Alice
     with subtest("SMTP delivers mail to Alice"):
         mail.succeed(
             "${pkgs.swaks}/bin/swaks "
@@ -112,11 +114,9 @@ pkgs.testers.runNixOSTest {
             "--body 'This is a test message for Alice.'"
         )
         time.sleep(2)
-        # Maildir stores messages in new/ directory
         mail.succeed("ls /data/mail/alice/new/ | grep -v '^$'")
         mail.succeed("grep -r 'Subject: Email for Alice' /data/mail/alice/")
 
-    # Test SMTP delivery to Bob
     with subtest("SMTP delivers mail to Bob"):
         mail.succeed(
             "${pkgs.swaks}/bin/swaks "
@@ -132,7 +132,6 @@ pkgs.testers.runNixOSTest {
         mail.succeed("ls /data/mail/bob/new/ | grep -v '^$'")
         mail.succeed("grep -r 'Subject: Email for Bob' /data/mail/bob/")
 
-    # Test authenticated submission from Alice to Bob
     with subtest("Authenticated submission from Alice to Bob"):
         mail.succeed(
             "${pkgs.swaks}/bin/swaks "
@@ -152,7 +151,6 @@ pkgs.testers.runNixOSTest {
         time.sleep(2)
         mail.succeed("grep -r 'Subject: Message from Alice' /data/mail/bob/")
 
-    # Test delivery via alias - postmaster@test.local -> alice
     with subtest("Alias delivery: postmaster delivers to Alice"):
         mail.succeed(
             "${pkgs.swaks}/bin/swaks "
@@ -167,7 +165,6 @@ pkgs.testers.runNixOSTest {
         time.sleep(2)
         mail.succeed("grep -r 'Subject: Postmaster Alias Test' /data/mail/alice/")
 
-    # Test delivery via alias - info@test.local -> bob
     with subtest("Alias delivery: info delivers to Bob"):
         mail.succeed(
             "${pkgs.swaks}/bin/swaks "
@@ -182,7 +179,6 @@ pkgs.testers.runNixOSTest {
         time.sleep(2)
         mail.succeed("grep -r 'Subject: Info Alias Test' /data/mail/bob/")
 
-    # Test catchall - unknown@test.local -> alice
     with subtest("Catchall delivery: unknown address delivers to Alice"):
         mail.succeed(
             "${pkgs.swaks}/bin/swaks "
@@ -197,10 +193,28 @@ pkgs.testers.runNixOSTest {
         time.sleep(2)
         mail.succeed("grep -r 'Subject: Catchall Test' /data/mail/alice/")
 
-    # Verify mailbox isolation - Alice's maildir should not have Bob's mail
     with subtest("Mailbox isolation"):
         mail.fail("grep -r 'Email for Bob' /data/mail/alice/")
         mail.fail("grep -r 'Email for Alice' /data/mail/bob/")
+
+    # Test service restart works without netavark errors
+    with subtest("Service restart works cleanly"):
+        mail.succeed("systemctl restart podman-opensmtpd.service")
+        mail.wait_for_unit("podman-opensmtpd.service", timeout=120)
+        mail.wait_for_open_port(25, timeout=60)
+        # Verify mail delivery still works after restart
+        mail.succeed(
+            "${pkgs.swaks}/bin/swaks "
+            "--to alice@test.local "
+            "--from sender@external.com "
+            "--server localhost "
+            "--port 25 "
+            "--timeout 30 "
+            "--header 'Subject: Post-restart Test' "
+            "--body 'This message was sent after service restart.'"
+        )
+        time.sleep(2)
+        mail.succeed("grep -r 'Subject: Post-restart Test' /data/mail/alice/")
 
     # Test: Certificate reload
     with subtest("Certificate reload updates TLS cert"):
@@ -209,9 +223,9 @@ pkgs.testers.runNixOSTest {
             "openssl x509 -noout -fingerprint -sha256 -in /data/certs/fullchain.pem | cut -d= -f2"
         ).strip()
 
-        # Verify SMTP is serving this cert
+        # Verify SMTP submission is serving this cert (use STARTTLS on port 587)
         smtp_fp = mail.succeed(
-            "openssl s_client -connect localhost:587 -starttls smtp </dev/null 2>/dev/null | "
+            "openssl s_client -starttls smtp -connect localhost:587 </dev/null 2>/dev/null | "
             "sed -n '/-----BEGIN CERTIFICATE-----/,/-----END CERTIFICATE-----/p' | "
             "openssl x509 -noout -fingerprint -sha256 | cut -d= -f2"
         ).strip()
@@ -232,19 +246,20 @@ pkgs.testers.runNixOSTest {
         ).strip()
         assert new_fp != initial_fp, "New cert should have different fingerprint"
 
-        # Reload service (same command as ACME postRun)
-        mail.succeed("systemctl try-reload-or-restart podman-opensmtpd.service")
+        # Restart service to pick up new cert (OpenSMTPd doesn't support SIGHUP reload)
+        mail.succeed("systemctl restart podman-opensmtpd.service")
+        mail.wait_for_unit("podman-opensmtpd.service", timeout=120)
         mail.wait_for_open_port(587, timeout=60)
 
         # Verify SMTP now serves NEW cert
         smtp_fp_after = mail.succeed(
-            "openssl s_client -connect localhost:587 -starttls smtp </dev/null 2>/dev/null | "
+            "openssl s_client -starttls smtp -connect localhost:587 </dev/null 2>/dev/null | "
             "sed -n '/-----BEGIN CERTIFICATE-----/,/-----END CERTIFICATE-----/p' | "
             "openssl x509 -noout -fingerprint -sha256 | cut -d= -f2"
         ).strip()
 
         assert smtp_fp_after == new_fp, f"Cert not reloaded: {smtp_fp_after} != {new_fp}"
-        print("OpenSMTPd successfully reloaded with new certificate!")
+        print("OpenSMTPd successfully restarted with new certificate!")
 
     print("OpenSMTPd standalone test passed!")
   '';

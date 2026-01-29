@@ -453,11 +453,12 @@ in
         # Systemd hardening
         # Note: ProtectSystem omitted - podman needs write access to /var/lib/containers and /etc/containers
         # Note: NoNewPrivileges omitted - podman needs to write /proc/*/uid_map for user namespaces
-        ProtectHome = true;
-        PrivateTmp = true;
-        # ProtectKernelTunables disabled - podman/netavark needs to modify /proc/sys for networking
+        # Mount namespace isolation disabled - causes systemd to create separate mount namespaces
+        # for ExecStart and ExecStop, breaking netavark's network namespace cleanup
+        ProtectHome = false;
+        PrivateTmp = false;
         ProtectKernelTunables = false;
-        ProtectKernelModules = true;
+        ProtectKernelModules = false;
         # ProtectControlGroups omitted - podman needs to create cgroups for containers
         RestrictSUIDSGID = true;
         # Resource limits handled by container runtime, not systemd
@@ -474,13 +475,14 @@ in
 
         # Systemd hardening
         # Note: ProtectSystem omitted - podman needs write access to /var/lib/containers and /etc/containers
-        # Note: ProtectHome omitted - podman needs to read /root/.config/containers/
         # Note: NoNewPrivileges omitted - podman needs to write /proc/*/uid_map for user namespaces
         # Note: CapabilityBoundingSet omitted - podman needs CAP_SETUID/CAP_SETGID for user namespaces
-        PrivateTmp = true;
-        # ProtectKernelTunables disabled - podman/netavark needs to modify /proc/sys for networking
+        # Mount namespace isolation disabled - causes systemd to create separate mount namespaces
+        # for ExecStart and ExecStop, breaking netavark's network namespace cleanup
+        ProtectHome = false;
+        PrivateTmp = false;
         ProtectKernelTunables = false;
-        ProtectKernelModules = true;
+        ProtectKernelModules = false;
         # ProtectControlGroups omitted - podman needs to create cgroups for containers
         RestrictSUIDSGID = true;
         # Resource limits handled by container runtime, not systemd

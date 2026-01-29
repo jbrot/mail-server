@@ -250,11 +250,13 @@ in
         # Note: ProtectSystem omitted - podman needs write access to /var/lib/containers and /etc/containers
         # Note: NoNewPrivileges omitted - podman needs to write /proc/*/uid_map for user namespaces
         # Note: CapabilityBoundingSet omitted - podman needs many capabilities; container caps are managed by podman itself
-        ProtectHome = true;
-        PrivateTmp = true;
-        # ProtectKernelTunables disabled - podman/netavark needs to modify /proc/sys for networking
+        # Mount namespace isolation settings disabled - these cause systemd to create
+        # separate mount namespaces for ExecStart and ExecStop, which breaks netavark's
+        # ability to access the container's network namespace bind mount during cleanup
+        ProtectHome = false;
+        PrivateTmp = false;
         ProtectKernelTunables = false;
-        ProtectKernelModules = true;
+        ProtectKernelModules = false;
         # ProtectControlGroups omitted - podman needs to create cgroups for containers
         RestrictSUIDSGID = true;
         # Resource limits handled by container runtime, not systemd
