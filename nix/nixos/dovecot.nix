@@ -386,6 +386,7 @@ in
     # Container service configuration
     systemd.services.podman-dovecot = {
       after = [ "network-online.target" ];
+      restartTriggers = [ cfg.image ];
       serviceConfig = {
         Restart = "always";
         RestartSec = "10s";

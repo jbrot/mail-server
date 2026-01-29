@@ -446,6 +446,7 @@ in
     # Redis container service configuration
     systemd.services.podman-rspamd-redis = {
       after = [ "network-online.target" ];
+      restartTriggers = [ cfg.redis.image ];
       serviceConfig = {
         Restart = "always";
         RestartSec = "10s";
@@ -469,6 +470,7 @@ in
     systemd.services.podman-rspamd = {
       after = [ "network-online.target" "podman-rspamd-redis.service" ];
       requires = [ "podman-rspamd-redis.service" ];
+      restartTriggers = [ cfg.image ];
       serviceConfig = {
         Restart = "always";
         RestartSec = "10s";
