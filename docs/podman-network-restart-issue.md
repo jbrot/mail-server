@@ -1,8 +1,15 @@
 # Podman Network Restart Issue
 
+## Status: RESOLVED
+
+The issue has been fixed by disabling systemd mount namespace isolation settings.
+See [The Fix](#the-fix) section below.
+
 ## Summary
 
-Container restarts with podman's netavark bridge networking fail to restore port forwarding due to stale network namespace references. This affects `systemctl try-reload-or-restart` operations used for certificate renewal.
+Container restarts with podman's netavark bridge networking were failing to restore
+port forwarding due to stale network namespace references. This affected
+`systemctl restart` operations used for certificate renewal.
 
 ## Symptoms
 
@@ -13,21 +20,55 @@ After a container restart:
 - Error in logs: `Error: netavark: setns: IO error: Invalid argument (os error 22)`
 - Error: `Peer netns reference is invalid`
 
-## Root Cause
+## Root Cause Analysis
 
-Known podman/netavark bug where DNAT rules and network namespace cleanup fail during container restarts when using bridge networking.
+### Initial Hypothesis (Incorrect)
 
-GitHub Issue: https://github.com/containers/podman/issues/27516
+We initially suspected this was the known podman/netavark bug:
+https://github.com/containers/podman/issues/27516
 
-### Detailed Mechanism
+However, after extensive debugging with syscall tracing, we discovered the actual
+root cause is **systemd's mount namespace isolation**.
 
-When a container is stopped, netavark attempts to enter the container's network namespace
-via `setns()` to tear down networking (remove veth pairs, delete DNAT rules, etc.). However,
-the namespace is already gone by the time cleanup runs, so `setns()` fails with
-`EINVAL (os error 22)`. This leaves stale state behind.
+### Actual Root Cause: Systemd Mount Namespace Isolation
 
-When the new container starts, netavark sets up fresh networking (new IP, new veth, new DNAT
-rules) — but the old rules are still present. The result:
+When systemd security settings like `ProtectHome`, `PrivateTmp`, `ProtectKernelModules`,
+or `ProtectKernelTunables` are enabled, systemd creates **separate mount namespaces**
+for each `ExecStart` and `ExecStop` invocation via `unshare(CLONE_NEWNS)`.
+
+The problem:
+
+1. **ExecStart** runs `podman start`, which spawns `conmon` to manage the container
+2. `conmon` creates a network namespace and bind-mounts it to `/run/netns/<id>`
+3. This bind mount only exists in conmon's mount namespace (inherited from ExecStart)
+4. **ExecStop** runs `podman stop` in a **different mount namespace**
+5. `netavark` tries to `setns()` to `/run/netns/<id>` but the file is either missing
+   or points to an invalid namespace (the bind mount isn't visible)
+6. `setns()` fails with `EINVAL`, cleanup fails, stale iptables rules remain
+
+### Debugging Evidence
+
+Using audit tracing on `setns`, `unshare`, and related syscalls, we observed:
+
+```
+# ExecStart runs in mount namespace 4026532377
+type=SYSCALL ... syscall=272 (unshare) ... exe="/usr/lib/systemd/systemd"
+# Later, conmon creates netns bind mount visible in this namespace
+
+# ExecStop runs in a DIFFERENT mount namespace 4026532445
+type=SYSCALL ... syscall=272 (unshare) ... exe="/usr/lib/systemd/systemd"
+# netavark can't see the bind mount, setns fails
+type=SYSCALL ... syscall=308 (setns) ... res=-22 (EINVAL)
+```
+
+When we ran `podman stop` from conmon's mount namespace using `nsenter`, it worked:
+```bash
+nsenter --mount=/proc/<conmon_pid>/ns/mnt podman stop opensmtpd  # SUCCESS
+```
+
+### The Stale State Problem
+
+When netavark's cleanup fails:
 
 **Stale iptables DNAT rules take precedence.** The `NETAVARK-DN-*` chain ends up with
 duplicate entries — the old rules pointing to the dead container's IP come first:
@@ -46,57 +87,72 @@ Since iptables evaluates rules top-to-bottom, traffic is DNAT'd to the old IP (`
 which no longer exists, resulting in "Connection refused" or "No route to host".
 
 **Stale veth interfaces remain.** The old `veth0@if2` stays attached to the bridge with
-`Error: Peer netns reference is invalid`, while the new container gets a new veth.
+`Error: Peer netns reference is invalid`.
 
-**Duplicate jump rules accumulate.** The `NETAVARK-HOSTPORT-DNAT` chain gets duplicate jump
-entries — one set referencing the old container ID and one set for the new.
+**Duplicate jump rules accumulate.** The `NETAVARK-HOSTPORT-DNAT` chain gets duplicate
+jump entries for each restart.
 
-**Key observation:** `ss -tlnp` on the host shows ports listening (via conmon), and the new
-container is running correctly on its new IP. The problem is purely in the DNAT forwarding
-path — traffic never reaches the new container because stale rules intercept it first.
+## The Fix
 
-## Workaround
+Disable mount namespace isolation settings in systemd service units for podman containers:
 
-Use host networking (`--network=host`) instead of bridge networking for containers that need to be restarted (e.g., for certificate reloads).
+```nix
+systemd.services.podman-<container>.serviceConfig = {
+  # Mount namespace isolation disabled - these settings cause systemd to create
+  # separate mount namespaces for ExecStart and ExecStop, breaking netavark's
+  # ability to access the container's network namespace bind mount during cleanup
+  ProtectHome = false;
+  PrivateTmp = false;
+  ProtectKernelTunables = false;
+  ProtectKernelModules = false;
+};
+```
 
-In NixOS module configuration:
+With these settings disabled, ExecStart and ExecStop run in the same mount namespace
+(the root mount namespace), and netavark can access the network namespace bind mount
+created by conmon during container startup.
+
+### Why This Works
+
+The `Protect*` and `PrivateTmp` settings trigger `unshare(CLONE_NEWNS)` to create a
+private mount namespace. By disabling them:
+
+- ExecStart and ExecStop both use the root mount namespace (`mnt:[4026531841]`)
+- The `/run/netns/<id>` bind mount created by conmon is visible to both
+- `netavark` can successfully `setns()` and clean up networking
+
+### Security Implications
+
+Disabling these settings reduces isolation but is acceptable for podman services because:
+
+- Containers already have their own namespaces for isolation
+- Podman itself needs access to various system paths (`/var/lib/containers`, etc.)
+- The containerized services don't have direct host filesystem access anyway
+
+## Previous Workaround (No Longer Needed)
+
+Before finding the fix, we used host networking as a workaround:
+
 ```nix
 networking.networks = [ "host" ];
 networking.publishPorts = [ ];  # Not needed with host networking
 ```
 
-## Trade-offs
-
-**Host networking advantages:**
-- Container restarts work reliably
-- Slightly better performance (no NAT overhead)
-- Simpler debugging (ports directly on host)
-
-**Host networking disadvantages:**
-- No network isolation between containers
-- Port conflicts possible if multiple containers use same ports
-- Container sees all host network interfaces
+This avoided the netavark cleanup issue entirely but sacrificed network isolation.
+**This workaround is no longer necessary.**
 
 ## Affected Services
 
+All podman container services needed the fix:
 - OpenSMTPd (ports 25, 587)
 - Dovecot (ports 143, 993, 24)
+- Rspamd
+- Redis
 
-## Possible Alternative Workarounds
+## Related Information
 
-If host networking is not acceptable, the stale DNAT rules could potentially be flushed
-before restarting the container — e.g., via an `ExecStartPre` script that removes the
-netavark iptables chains for the old container. This has not been tested and may have
-side effects if multiple containers share the same bridge network.
-
-## Future Considerations
-
-Once the upstream podman issue is resolved, we could potentially switch back to bridge networking for better isolation. Monitor:
-- https://github.com/containers/podman/issues/27516
-- https://github.com/containers/netavark/issues
-
-## Related Changes
-
-- Tests use `networking.nameservers = lib.mkForce [ "127.0.0.1" ];` for fast-failing DNS in VM test environments (no internet access)
+- Tests use `networking.nameservers = [ "127.0.0.1" ];` for fast-failing DNS in VM test environments
 - Dovecot supports proper reload via SIGHUP (`ExecReload` configured)
 - OpenSMTPd does not support SIGHUP reload (exits on SIGHUP), so it uses full restart
+- The upstream podman issue https://github.com/containers/podman/issues/27516 may describe
+  a related but distinct problem
