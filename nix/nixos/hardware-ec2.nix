@@ -49,6 +49,13 @@ in
   # Time zone
   time.timeZone = "UTC";
 
+  # Ensure AWS link-local services are reachable via main interface
+  # (Podman veth interfaces can claim the 169.254.0.0/16 link-local route)
+  # Covers: .253 (VPC DNS resolver), .254 (instance metadata service)
+  networking.interfaces.eth0.ipv4.routes = [
+    { address = "169.254.169.252"; prefixLength = 30; }
+  ];
+
   # Format and label the EBS data volume on first boot
   services.formatDataVolume.enable = true;
 }
