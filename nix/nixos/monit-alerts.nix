@@ -18,6 +18,36 @@ let
     '') cfg.filesystems
   );
 
+  # Script to check systemd service health
+  # Returns non-zero if service is not active OR has been restarted (NRestarts > 0)
+  # Admin can clear restart count with: systemctl reset-failed <service>
+  serviceCheckScript = pkgs.writeShellScript "check-systemd-service" ''
+    SERVICE="$1"
+
+    # Check if service is active
+    if ! ${pkgs.systemd}/bin/systemctl is-active --quiet "$SERVICE"; then
+      echo "$SERVICE is not active"
+      exit 1
+    fi
+
+    # Check if service has been restarted (indicates a past crash)
+    RESTARTS=$(${pkgs.systemd}/bin/systemctl show "$SERVICE" -p NRestarts --value)
+    if [ "$RESTARTS" -gt 0 ]; then
+      echo "$SERVICE has restarted $RESTARTS time(s) - clear with: systemctl reset-failed $SERVICE"
+      exit 2
+    fi
+
+    exit 0
+  '';
+
+  # Generate service check blocks for systemd services
+  serviceChecks = lib.concatStringsSep "\n" (
+    map (name: ''
+      check program ${name} with path "${serviceCheckScript} ${name}.service"
+        if status != 0 then alert
+    '') cfg.services
+  );
+
   # Build the monit config from options
   monitConfig = ''
     # Check interval (seconds)
@@ -49,6 +79,9 @@ ${lib.optionalString (cfg.alertEmail != "") ''
 
     # === Filesystem checks ===
     ${filesystemChecks}
+
+    # === Service checks ===
+    ${serviceChecks}
 
     ${cfg.extraConfig}
   '';
@@ -122,6 +155,13 @@ in
       };
       example = { rootfs = "/"; data = "/data"; };
       description = "Filesystems to monitor (name = path)";
+    };
+
+    services = lib.mkOption {
+      type = lib.types.listOf lib.types.str;
+      default = [];
+      example = [ "podman-opensmtpd" "podman-dovecot" "podman-rspamd" "podman-rspamd-redis" ];
+      description = "Systemd services to monitor (alert if not active)";
     };
 
     extraConfig = lib.mkOption {

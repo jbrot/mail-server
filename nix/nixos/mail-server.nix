@@ -120,6 +120,7 @@ in
       default = true;
       description = "Enable DNS-based SMTP filters (rDNS, FCrDNS, dyndns check). Disable for testing without proper DNS.";
     };
+
   };
 
   config = lib.mkIf cfg.enable {
@@ -128,6 +129,16 @@ in
     # - Filtered: mail-rspamd-external (Rspamd - DNS + rspamd.com only via nftables)
     #             mail-imap-external (Dovecot - inbound only, no egress via nftables)
     # - Internal: mail-internal (OpenSMTPd/Dovecot/Rspamd), mail-rspamd-redis (Rspamd/Redis)
+
+    # === Monit Container Monitoring ===
+    # Add container services to Monit for failure alerting
+    # Monit's event queue handles the case where OpenSMTPd itself fails
+    services.monitAlerts.services = [
+      "podman-opensmtpd"
+      "podman-dovecot"
+      "podman-rspamd"
+      "podman-rspamd-redis"
+    ];
 
     # === DKIM Key Manager ===
     services.dkimKeyManager = {

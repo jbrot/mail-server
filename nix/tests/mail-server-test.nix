@@ -469,6 +469,59 @@ pkgs.testers.runNixOSTest {
         # Cleanup: remove the fill file
         mail.succeed("rm -f /mnt/testfs/fillfile")
 
+    # Test container failure alert via Monit (targeting OpenSMTPd to test event queue)
+    with subtest("Container failure alert email delivered via Monit"):
+        # Clear any existing mail in testuser's inbox
+        mail.succeed("rm -f /data/mail/testuser/new/* /data/mail/testuser/cur/* 2>/dev/null || true")
+
+        # Verify Monit is monitoring the container services
+        monit_status = mail.succeed("monit status podman-opensmtpd")
+        print(f"Monit status for opensmtpd:\n{monit_status}")
+
+        # Kill OpenSMTPd to simulate a crash
+        # This tests Monit's event queue - alert can't be sent while mail server is down
+        # but should be delivered once it comes back up
+        mail.succeed("systemctl kill --signal=SIGKILL podman-opensmtpd.service")
+        time.sleep(2)
+
+        # Restart OpenSMTPd
+        mail.wait_for_unit("podman-opensmtpd.service", timeout=60)
+        mail.wait_for_open_port(25, timeout=30)
+
+        # Verify the service is running but has restart count > 0
+        restarts = mail.succeed("systemctl show podman-opensmtpd.service -p NRestarts --value").strip()
+        print(f"NRestarts counter: {restarts}")
+        assert int(restarts) > 0, f"Expected NRestarts > 0, got {restarts}"
+
+        # Wait for Monit to detect the restart and deliver queued alert
+        time.sleep(15)
+
+        # Check Monit status shows the issue
+        monit_status_after = mail.succeed("monit status podman-opensmtpd || true")
+        print(f"Monit status after restart:\n{monit_status_after}")
+
+        # Check for failure alert email in testuser's mailbox
+        mail_content = mail.succeed("cat /data/mail/testuser/new/* /data/mail/testuser/cur/* 2>/dev/null || echo 'empty'")
+
+        # Log the full email content for debugging
+        print("=" * 60)
+        print("Container failure alert email content:")
+        print("=" * 60)
+        print(mail_content)
+        print("=" * 60)
+
+        # Verify the alert email mentions the failed service
+        assert "podman-opensmtpd" in mail_content, \
+            f"Container failure alert not found in mailbox. Content: {mail_content[:500]}"
+        # Alert may say "not active" (detected while down) or "restart" (detected NRestarts > 0)
+        assert "not active" in mail_content.lower() or "restart" in mail_content.lower(), \
+            f"Alert email doesn't mention failure. Content: {mail_content[:500]}"
+        print("SUCCESS: Container failure alert delivered via Monit (event queue worked)")
+
+        # Clear the restart counter for subsequent tests
+        mail.succeed("systemctl reset-failed podman-opensmtpd.service")
+        print("Cleared NRestarts counter with reset-failed")
+
     # Final status check
     with subtest("All services healthy"):
         # Show all containers for diagnostics
