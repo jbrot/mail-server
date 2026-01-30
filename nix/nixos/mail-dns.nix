@@ -15,9 +15,11 @@ let
   # Build SPF record string from structured options
   spfString = let
     m = cfg.spf.mechanisms;
+    # For 'a' mechanism: "" means bare 'a', non-empty means 'a:domain'
+    formatA = a: if a == "" then "a" else "a:${a}";
     parts = [ "v=spf1" ]
       ++ lib.optional m.mx "mx"
-      ++ lib.optional m.a "a"
+      ++ map formatA m.a
       ++ map (ip: "ip4:${ip}") m.ip4
       ++ map (ip: "ip6:${ip}") m.ip6
       ++ map (d: "include:${d}") m.include
@@ -101,9 +103,14 @@ in
         };
 
         a = lib.mkOption {
-          type = lib.types.bool;
-          default = false;
-          description = "Allow mail from domain's A record";
+          type = lib.types.listOf lib.types.str;
+          default = [];
+          example = [ "" "mail.example.com" ];
+          description = ''
+            A record hosts allowed to send mail.
+            - "" (empty string) = current domain's A record (bare 'a')
+            - "example.com" = specific domain's A record ('a:example.com')
+          '';
         };
 
         ip4 = lib.mkOption {
