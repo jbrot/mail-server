@@ -188,6 +188,12 @@
   # Chrony for time sync
   services.chrony.enable = true;
 
+  # Swap file
+  swapDevices = [{
+    device = "/swapfile";
+    size = (mailServerConfig.aws.swapSize or 1) * 1024;  # Config is in GB, swapDevices expects MB
+  }];
+
   # === Mail Server Stack ===
   services.mailServer = {
     enable = true;

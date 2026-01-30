@@ -56,6 +56,7 @@
     instanceType = "t3.small";
     rootVolumeSize = 8;
     dataVolumeSize = 50;
+    swapSize = 1;  # GB
 
     # CIDR block for SSH access ("auto" = current IP, or e.g., "1.2.3.4/32")
     adminCidr = "auto";
