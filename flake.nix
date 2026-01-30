@@ -70,7 +70,10 @@
           ];
 
           # Terraform variables generated from Nix config
-          tfvars = import ./nix/tfvars.nix { inherit pkgs mailServerConfig; };
+          tfvars = import ./nix/tfvars.nix {
+            inherit pkgs mailServerConfig;
+            mailDns = self.lib.mailDns;
+          };
 
           # Terraform from pinned nixpkgs (for deploy.sh)
           terraform = pkgs.terraform;
@@ -99,10 +102,24 @@
           ./nix/nixos/hardware-ec2.nix
           ./nix/nixos/networking.nix
           ./nix/nixos/mail-server.nix
+          ./nix/nixos/mail-dns.nix
         ];
         specialArgs = {
           inherit self mailServerConfig;
         };
+      };
+
+      # Export mail DNS records for tfvars
+      # spfRecord and dmarcRecord are derivations containing validated strings
+      # Use builtins.readFile to get the string (this forces validation)
+      lib.mailDns = let
+        dnsConfig = self.nixosConfigurations.mail-server.config.mailDns;
+      in {
+        # Derivations (build to get validated strings)
+        inherit (dnsConfig) spfRecord dmarcRecord;
+        # Config values
+        spfEnabled = dnsConfig.spf.enable;
+        dmarcEnabled = dnsConfig.dmarc.enable;
       };
 
       # Development shell with useful tools

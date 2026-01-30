@@ -71,3 +71,15 @@ variable "route53_create_mx" {
   type        = bool
   default     = false
 }
+
+variable "spf_record" {
+  description = "SPF record value (empty string = disabled)"
+  type        = string
+  default     = ""
+}
+
+variable "dmarc_record" {
+  description = "DMARC record value (empty string = disabled)"
+  type        = string
+  default     = ""
+}

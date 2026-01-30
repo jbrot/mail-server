@@ -205,6 +205,26 @@ resource "aws_route53_record" "mx" {
   records = ["10 ${var.hostname}."]
 }
 
+# SPF TXT record (only created if spf_record is non-empty)
+resource "aws_route53_record" "spf" {
+  count   = var.spf_record != "" ? 1 : 0
+  zone_id = local.zone_id
+  name    = var.domain
+  type    = "TXT"
+  ttl     = 3600
+  records = [var.spf_record]
+}
+
+# DMARC TXT record (only created if dmarc_record is non-empty)
+resource "aws_route53_record" "dmarc" {
+  count   = var.dmarc_record != "" ? 1 : 0
+  zone_id = local.zone_id
+  name    = "_dmarc.${var.domain}"
+  type    = "TXT"
+  ttl     = 3600
+  records = [var.dmarc_record]
+}
+
 # IAM role for EC2 instance (DKIM Route53 management)
 resource "aws_iam_role" "mail_server" {
   name = "${var.project}-mail-server"

@@ -201,4 +201,12 @@
       route53ZoneId = mailServerConfig.aws.route53ZoneId or "";
     };
   };
+
+  # === Mail DNS Records (SPF/DMARC for Terraform) ===
+  mailDns = {
+    enable = true;
+    domain = mailServerConfig.domain;
+    spf = mailServerConfig.spf or {};
+    dmarc = mailServerConfig.dmarc or {};
+  };
 }

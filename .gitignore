@@ -33,5 +33,8 @@ secrets/
 # Production config (keep out of version control)
 config/production/
 
+# Personal config (keep out of version control)
+config/mail2.jbrot.com/
+
 # Generated terraform vars (symlink to nix store)
 terraform/from-nix.auto.tfvars

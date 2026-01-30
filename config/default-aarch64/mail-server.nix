@@ -28,6 +28,21 @@
     selector = "mail";
   };
 
+  # SPF - structured options build the record automatically
+  # Defaults: mx enabled, hard fail qualifier
+  spf = {
+    enable = true;
+    mechanisms.mx = true;
+    qualifier = "-all";
+  };
+
+  # DMARC - structured options
+  # Default: quarantine policy
+  dmarc = {
+    enable = true;
+    policy = "quarantine";
+  };
+
   # ACME certificate settings
   # Use staging server for testing (avoids rate limits, but certs aren't browser-trusted)
   acmeStaging = true;
