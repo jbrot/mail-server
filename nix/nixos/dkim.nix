@@ -100,9 +100,9 @@ in
 
         ${lib.optionalString cfg.route53.enable ''
         # Extract the full TXT record value from rspamadm output
-        # The output format is: selector._domainkey.domain IN TXT ( "v=DKIM1; k=rsa; p=..." ) ;
-        # We extract the quoted value(s) and use them directly
-        TXT_VALUE=$(grep -oP '"\K[^"]+' "$PUB_PATH" | tr -d '\n')
+        # The output format is: selector._domainkey.domain IN TXT ( "v=DKIM1; k=rsa;" "p=..." ) ;
+        # We extract all quoted strings, remove quotes, and join with space
+        TXT_VALUE=$(grep -o '"[^"]*"' "$PUB_PATH" | tr -d '"' | tr '\n' ' ' | sed 's/ $//')
 
         # Create Route53 TXT record
         echo "Creating Route53 TXT record for $DNS_RECORD..."

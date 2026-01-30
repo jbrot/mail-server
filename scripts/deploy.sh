@@ -100,8 +100,13 @@ run_dig() {
 }
 
 # Run swaks via nix using the pinned version from our flake
+# Suppress SMTP conversation output unless verbose mode is enabled
 run_swaks() {
-    nix run $NIX_VERBOSE .#swaks -- "$@"
+    local silent_flag=""
+    if [[ "$VERBOSE" != "true" ]]; then
+        silent_flag="--silent"
+    fi
+    nix run $NIX_VERBOSE .#swaks -- $silent_flag "$@"
 }
 
 # Check AWS credentials and prompt to configure if needed
@@ -840,6 +845,33 @@ test_dkim() {
         log_info "DKIM TXT record format is valid."
     fi
 
+    # Verify public key in DNS matches private key on server
+    log_info "Verifying DKIM public key matches private key..."
+    local server_pubkey dns_pubkey
+
+    # Extract public key from private key on server (base64, no headers, no newlines)
+    server_pubkey=$(ssh $SSH_OPTS "root@${INSTANCE_IP}" \
+        "openssl rsa -in /data/rspamd/dkim/${DOMAIN}.${DKIM_SELECTOR}.key -pubout 2>/dev/null" \
+        | grep -v '^-' | tr -d '\n')
+
+    # Extract public key from DNS TXT record (the p= value, strip any trailing junk)
+    dns_pubkey=$(echo "$txt_value" | sed 's/.*p=//' | sed 's/[^A-Za-z0-9+/=].*//' | tr -d ' ')
+
+    if [[ -z "$server_pubkey" ]]; then
+        log_error "Could not extract public key from server private key"
+        failed=1
+    elif [[ -z "$dns_pubkey" ]]; then
+        log_error "Could not extract public key from DNS TXT record"
+        failed=1
+    elif [[ "$server_pubkey" == "$dns_pubkey" ]]; then
+        log_info "DKIM public keys match between server and DNS"
+    else
+        log_error "DKIM public key MISMATCH!"
+        log_error "Server public key: $server_pubkey"
+        log_error "DNS public key:    $dns_pubkey"
+        failed=1
+    fi
+
     # Send test email and verify DKIM signature
     log_info "Sending test email to verify DKIM signature..."
 
@@ -1045,6 +1077,7 @@ phase_e2e() {
     local failed=0
 
     test_acme || failed=1
+    test_mail_dns || failed=1
 
     # Gather credentials once for mail and DKIM tests
     if ! gather_credentials; then
@@ -1054,7 +1087,6 @@ phase_e2e() {
 
     test_mail || failed=1
     test_dkim || failed=1
-    test_mail_dns || failed=1
 
     # Summary
     if [[ $failed -eq 0 ]]; then
