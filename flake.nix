@@ -103,6 +103,7 @@
           ./nix/nixos/networking.nix
           ./nix/nixos/mail-server.nix
           ./nix/nixos/mail-dns.nix
+          ./nix/nixos/monit-alerts.nix
         ];
         specialArgs = {
           inherit self mailServerConfig;
@@ -232,6 +233,11 @@
 
           # Format data volume service test (verifies disk formatting logic)
           format-data-volume = import ./nix/tests/format-data-volume-test.nix {
+            inherit pkgs;
+          };
+
+          # Monit alerting test (verifies threshold detection)
+          monit-alerts = import ./nix/tests/monit-test.nix {
             inherit pkgs;
           };
         } else {})
