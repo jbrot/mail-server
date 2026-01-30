@@ -17,7 +17,7 @@
   # Custom firewall using nftables
   # Provides fine-grained control over traffic flows:
   # - Container -> Host: DNS only (for aardvark-dns)
-  # - External -> Host: SSH, HTTP (ACME), Netdata
+  # - External -> Host: SSH, HTTP (ACME)
   # - External -> Container: Allowed (only published ports are routable via Podman NAT)
   # - Container egress: Filtered per-container in mail-networks.nix (imap-egress, rspamd-egress)
   networking.nftables.enable = true;
@@ -51,9 +51,6 @@
 
         # HTTP (ACME challenges)
         tcp dport 80 accept
-
-        # Netdata (restrict in production via security group)
-        tcp dport 19999 accept
 
         # Everything else dropped by policy
       }

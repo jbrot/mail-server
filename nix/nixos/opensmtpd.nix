@@ -49,6 +49,12 @@ let
     # Port 587 - Submission (STARTTLS, for client submission)
     listen on 0.0.0.0 port 587 tls-require pki ${cfg.serverDomain} auth ${lib.optionalString (cfg.credentials != {}) "<credentials>"}${lib.optionalString cfg.enableRspamd " filter rspamd"}
 
+    ${lib.optionalString (cfg.localSubmissionPort != null) ''
+    # Port ${toString cfg.localSubmissionPort} - Local submission (no TLS, no auth, no filters)
+    # For system-generated mail (e.g., Monit alerts) that should bypass spam filtering
+    listen on 0.0.0.0 port ${toString cfg.localSubmissionPort}
+    ''}
+
     # Actions
     ${if cfg.localDelivery then ''
     action "local_mail" maildir "/data/mail/%{dest.user}" junk userbase <users> virtual <virtuals>
@@ -164,6 +170,13 @@ in
       type = lib.types.str;
       default = "dovecot";
       description = "Hostname for LMTP delivery to Dovecot (container name on shared network)";
+    };
+
+    localSubmissionPort = lib.mkOption {
+      type = lib.types.nullOr lib.types.int;
+      default = null;
+      example = 10025;
+      description = "Port for local mail submission (no TLS, no auth, no spam filtering). Set to null to disable.";
     };
 
     # Resource limits

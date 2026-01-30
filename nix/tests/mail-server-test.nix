@@ -33,6 +33,7 @@ pkgs.testers.runNixOSTest {
       ../nixos/test-certs.nix
       ../nixos/mail-server.nix
       ../nixos/networking.nix
+      ../nixos/monit-alerts.nix
     ];
 
     # Override AWS-specific settings from networking.nix for VM tests
@@ -75,6 +76,42 @@ pkgs.testers.runNixOSTest {
       # Disable DNS filters for testing (no rDNS/FCrDNS in VM environment)
       enableDnsFilters = false;
     };
+
+    # === Monit Alerting Configuration ===
+    services.monitAlerts = {
+      enable = true;
+      alertEmail = "testuser@test.local";
+      checkInterval = 5;  # Fast checks for testing
+
+      # Only monitor our test filesystem (not / or /data)
+      filesystems = {
+        testfs = "/mnt/testfs";
+      };
+
+      # Set low threshold so we can trigger it easily
+      thresholds = {
+        diskSpace = 50;  # Alert when >50% full
+        inodeUsage = 80;
+        memoryUsage = 99;  # High so it doesn't trigger
+        swapUsage = 99;
+        loadAvg = 100;
+      };
+    };
+
+    # Test filesystem for Monit alerting (tiny tmpfs to easily trigger alerts)
+    systemd.tmpfiles.rules = [
+      "d /mnt/testfs 0755 root root -"
+    ];
+
+    systemd.mounts = [
+      {
+        what = "tmpfs";
+        where = "/mnt/testfs";
+        type = "tmpfs";
+        options = "size=1M";
+        wantedBy = [ "multi-user.target" ];
+      }
+    ];
 
     # Add custom rspamd multimap rule for test spam detection (RBLs won't work without DNS)
     # Using same pattern as opensmtpd-rspamd-test.nix which is known to work
@@ -384,6 +421,53 @@ pkgs.testers.runNixOSTest {
         # Test IMAPS connectivity on port 993
         internet.succeed(f"timeout 5 bash -c 'echo > /dev/tcp/{mail_ip}/993'")
         print("IMAPS port 993 reachable from external client")
+
+    # Test that local submission port is not accessible from external clients
+    with subtest("Local submission port not accessible from internet"):
+        # Port 10025 should only be bound to localhost on the mail server
+        # External clients should not be able to connect
+        internet.fail(f"timeout 3 bash -c 'echo > /dev/tcp/{mail_ip}/10025'")
+        print("Port 10025 correctly blocked from external access")
+
+    # Test Monit alert email delivery through the full mail stack
+    with subtest("Monit alert email delivered through mail stack"):
+        # Wait for Monit service to be running
+        mail.wait_for_unit("monit.service")
+
+        # Verify test filesystem is mounted
+        mail.succeed("mountpoint -q /mnt/testfs")
+        print("Test filesystem mounted for Monit alerting")
+
+        # Clear any existing mail in testuser's inbox
+        mail.succeed("rm -f /data/mail/testuser/new/* /data/mail/testuser/cur/* 2>/dev/null || true")
+
+        # Fill testfs past 50% threshold (it's 1MB, so 600KB triggers alert)
+        mail.succeed("dd if=/dev/zero of=/mnt/testfs/fillfile bs=1K count=600 2>/dev/null")
+        print("Filled test filesystem past threshold")
+
+        # Wait for Monit check cycle (5 seconds) plus time for email delivery
+        # through the full stack: OpenSMTPd -> LMTP -> Dovecot (no rspamd on port 10025)
+        time.sleep(15)
+
+        # Check for alert email in testuser's mailbox
+        mail_content = mail.succeed("cat /data/mail/testuser/new/* /data/mail/testuser/cur/* 2>/dev/null || echo 'empty'")
+
+        # Log the full email content for debugging
+        print("=" * 60)
+        print("Monit alert email content:")
+        print("=" * 60)
+        print(mail_content)
+        print("=" * 60)
+
+        # Monit alert emails contain "monit alert" in subject and filesystem name in body
+        assert "monit" in mail_content.lower(), \
+            f"Monit alert email not found in mailbox. Content: {mail_content[:500]}"
+        assert "testfs" in mail_content, \
+            f"Alert email doesn't mention testfs. Content: {mail_content[:500]}"
+        print("SUCCESS: Monit alert email delivered through full mail stack")
+
+        # Cleanup: remove the fill file
+        mail.succeed("rm -f /mnt/testfs/fillfile")
 
     # Final status check
     with subtest("All services healthy"):

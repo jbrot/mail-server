@@ -66,8 +66,8 @@ in
 
     mailServer = lib.mkOption {
       type = lib.types.str;
-      default = "localhost";
-      description = "SMTP server for sending alerts";
+      default = "localhost port 10025";
+      description = "SMTP server for sending alerts. Default uses local submission port (bypasses spam filtering).";
     };
 
     checkInterval = lib.mkOption {

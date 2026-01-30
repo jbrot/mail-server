@@ -28,6 +28,19 @@
     selector = "mail";
   };
 
+  # Local submission port for system-generated mail (e.g., Monit alerts)
+  # This port bypasses spam filtering and is only accessible from localhost
+  localSubmission = {
+    enable = true;   # default: true
+    port = 10025;    # default: 10025
+  };
+
+  # Monitoring alerts (Monit)
+  # Username for system alerts (disk space, memory, etc.) - domain is added automatically
+  # Set to "postmaster" to send alerts to postmaster@<domain>
+  # Default: disabled (no alert emails)
+  alertEmail = "postmaster";
+
   # SPF - structured options build the record automatically
   # Defaults: mx enabled, hard fail qualifier
   spf = {

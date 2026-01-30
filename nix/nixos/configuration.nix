@@ -153,7 +153,7 @@
     };
   };
 
-  # Create ACME challenge directory
+  # Create required directories
   systemd.tmpfiles.rules = [
     "d /var/lib/acme/acme-challenge 0755 acme acme -"
     "d /data/mail 0700 vmail vmail -"
@@ -161,20 +161,12 @@
     "d /data/rspamd 0750 1000 1000 -"  # rspamd user in container
   ];
 
-  # Netdata for monitoring
-  services.netdata = {
+  # Monit for system monitoring and alerting
+  # alertEmail: username (domain added automatically), unset or "" to disable
+  services.monitAlerts = {
     enable = true;
-    config = {
-      global = {
-        "memory mode" = "dbengine";
-        "page cache size" = 32;
-        "dbengine multihost disk space" = 256;
-      };
-      web = {
-        "bind to" = "0.0.0.0";
-        "allow netdata.conf from" = "localhost";
-      };
-    };
+    alertEmail = lib.optionalString ((mailServerConfig.alertEmail or "") != "")
+      "${mailServerConfig.alertEmail}@${mailServerConfig.domain}";
   };
 
   # Journald configuration
@@ -205,6 +197,10 @@
       enable = mailServerConfig.dkim.enable or false;
       selector = mailServerConfig.dkim.selector or "mail";
       route53ZoneId = mailServerConfig.aws.route53ZoneId or "";
+    };
+    localSubmission = {
+      enable = mailServerConfig.localSubmission.enable or true;
+      port = mailServerConfig.localSubmission.port or 10025;
     };
   };
 

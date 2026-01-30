@@ -99,6 +99,21 @@ in
       description = "Enable debug logging for all services";
     };
 
+    # Local submission (for system-generated mail like Monit alerts)
+    localSubmission = {
+      enable = lib.mkOption {
+        type = lib.types.bool;
+        default = true;
+        description = "Enable local submission port for system-generated mail (bypasses spam filtering)";
+      };
+
+      port = lib.mkOption {
+        type = lib.types.int;
+        default = 10025;
+        description = "Port for local mail submission (only accessible from localhost)";
+      };
+    };
+
     # DNS-based spam filters
     enableDnsFilters = lib.mkOption {
       type = lib.types.bool;
@@ -187,9 +202,15 @@ in
       # DNS filters (rDNS/FCrDNS) - configurable for environments without proper DNS
       enableDnsFilters = cfg.enableDnsFilters;
 
+      # Local submission port for system-generated mail (e.g., Monit alerts)
+      # Bypasses spam filtering - only accessible from localhost
+      localSubmissionPort = if cfg.localSubmission.enable then cfg.localSubmission.port else null;
+
       # Network: smtp-external (inbound/outbound mail), internal (rspamd filtering, LMTP delivery)
       networking.networks = [ "mail-smtp-external" "mail-internal" ];
-      networking.publishPorts = [ "25:25" "587:587" ];
+      # Port for local system mail (Monit alerts, etc.) bound to localhost only
+      networking.publishPorts = [ "25:25" "587:587" ]
+        ++ lib.optional cfg.localSubmission.enable "127.0.0.1:${toString cfg.localSubmission.port}:${toString cfg.localSubmission.port}";
     };
 
     # === Service Ordering ===

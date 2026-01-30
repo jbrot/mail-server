@@ -24,7 +24,9 @@
       # Nixpkgs instantiated for each system
       nixpkgsFor = forAllSystems (system: import nixpkgs {
         inherit system;
-        config.allowUnfree = true;
+        config.allowUnfreePredicate = pkg: builtins.elem (nixpkgs.lib.getName pkg) [
+          "terraform"
+        ];
       });
 
       # Import mail server configuration from the config input
