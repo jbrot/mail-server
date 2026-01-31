@@ -2,6 +2,15 @@
 
 A reproducible, containerized mail server deployed to AWS EC2 using NixOS and Terraform.
 
+I originally set this up on an EC2 instance by hand, following [Gilles Chehade's excellent guide](https://poolp.org/posts/2019-09-14/setting-up-a-mail-server-with-opensmtpd-dovecot-and-rspamd/).
+That original setup was rock solid and I used it for 5 years without incident.
+
+I created this repo to try out using Claude and see if together we could recreate the setup with some improved security, automation, and monitoring.
+I intend to write a blogpost soon with more discussion on my experience, but overall it was very positive!
+As you can see the project was quickly and successfully completed.
+
+Maybe I'll make a version 3 in another 5 years, haha.
+
 ## Features
 
 - **Full mail stack**: OpenSMTPd (SMTP), Dovecot (IMAP), Rspamd (spam filtering), Redis (Rspamd backend)
@@ -17,17 +26,17 @@ A reproducible, containerized mail server deployed to AWS EC2 using NixOS and Te
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                        AWS EC2 (NixOS)                       │
+│                        AWS EC2 (NixOS)                      │
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐          │
 │  │  OpenSMTPd  │──│   Rspamd    │──│   Redis     │          │
 │  │  (SMTP)     │  │  (filter)   │  │  (backend)  │          │
 │  └─────────────┘  └─────────────┘  └─────────────┘          │
-│         │                │                                   │
+│         │                │                                  │
 │         │         ┌──────┴──────┐                           │
 │         └────────▶│   Dovecot   │◀── IMAP clients           │
 │                   │   (IMAP)    │                           │
 │                   └─────────────┘                           │
-│                          │                                   │
+│                          │                                  │
 │                   ┌──────┴──────┐                           │
 │                   │  /data/mail │  (EBS volume)             │
 │                   └─────────────┘                           │
