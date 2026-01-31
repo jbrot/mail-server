@@ -34,6 +34,7 @@ in
   };
 
   config = lib.mkIf cfg.enable {
+    # Boot-time service - runs before filesystems are mounted
     systemd.services.format-data-volume = {
       description = "Format and label data volume if needed";
       wantedBy = [ "local-fs-pre.target" ];
@@ -75,6 +76,45 @@ in
         else
           echo "Volume $DEVICE already formatted as $FSTYPE with label '$LABEL', skipping"
         fi
+      '';
+    };
+
+    # Activation script - runs during nixos-rebuild switch
+    # Handles case where volume exists but isn't mounted (e.g., after volume recreation)
+    system.activationScripts.formatDataVolume = {
+      text = ''
+        # Skip if /data is already mounted
+        if ${pkgs.util-linux}/bin/mountpoint -q /data 2>/dev/null; then
+          exit 0
+        fi
+
+        echo "Checking data volume..."
+
+        # Find the first existing block device from candidate list
+        DEVICE=""
+        for dev in ${lib.escapeShellArgs cfg.devices}; do
+          if [ -b "$dev" ]; then
+            DEVICE="$dev"
+            break
+          fi
+        done
+
+        if [ -z "$DEVICE" ]; then
+          echo "No data volume found"
+          exit 0
+        fi
+
+        # Get current filesystem type (empty if unformatted)
+        FSTYPE=$(${pkgs.util-linux}/bin/blkid -o value -s TYPE "$DEVICE" 2>/dev/null || true)
+
+        if [ -z "$FSTYPE" ]; then
+          echo "Formatting $DEVICE as ${cfg.fsType}..."
+          ${pkgs.e2fsprogs}/bin/mkfs.${cfg.fsType} -L "${cfg.label}" "$DEVICE"
+        fi
+
+        # Try to mount /data
+        echo "Mounting /data..."
+        ${pkgs.util-linux}/bin/mount /data || true
       '';
     };
   };
