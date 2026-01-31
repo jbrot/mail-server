@@ -19,7 +19,7 @@ let
     # SPF/DMARC records validated at Nix build time (via IFD)
     # Regenerate with: nix build .#tfvars --override-input mail-server-config path:./config/<name>
 
-    project          = "${mailServerConfig.project}"
+    project          = "${mailServerConfig.aws.project}"
     aws_region       = "${mailServerConfig.aws.region}"
     instance_type    = "${mailServerConfig.aws.instanceType}"
     root_volume_size = ${toString mailServerConfig.aws.rootVolumeSize}
@@ -31,8 +31,8 @@ let
     # DNS settings
     domain             = "${mailServerConfig.domain}"
     hostname           = "${mailServerConfig.hostname}"
-    route53_zone_id    = "${mailServerConfig.aws.route53ZoneId or ""}"
-    route53_create_mx  = ${if (mailServerConfig.aws.route53CreateMX or false) then "true" else "false"}
+    route53_zone_id    = "${mailServerConfig.aws.route53.zoneId or ""}"
+    route53_create_mx  = ${if (mailServerConfig.aws.route53.createMX or false) then "true" else "false"}
 
     # SPF/DMARC settings (validated via checkdmarc, empty = disabled)
     spf_record   = "${spfRecord}"

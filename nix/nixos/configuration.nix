@@ -112,8 +112,8 @@
   security.acme = {
     acceptTerms = true;
     defaults = {
-      email = mailServerConfig.acmeEmail;
-    } // lib.optionalAttrs (mailServerConfig.acmeStaging or false) {
+      email = mailServerConfig.acme.email;
+    } // lib.optionalAttrs (mailServerConfig.acme.staging or false) {
       # Use staging server for testing (avoids rate limits, but certs aren't browser-trusted)
       server = "https://acme-staging-v02.api.letsencrypt.org/directory";
     };
@@ -194,9 +194,10 @@
     users = mailServerConfig.users or {};
     aliases = mailServerConfig.aliases or {};
     dkim = (mailServerConfig.dkim or {}) // {
-      route53ZoneId = mailServerConfig.aws.route53ZoneId or "";
+      route53ZoneId = mailServerConfig.aws.route53.zoneId or "";
     };
-    localSubmission = mailServerConfig.localSubmission or {};
+    # Enable local submission automatically when monit alerting is enabled
+    localSubmission.enable = (mailServerConfig.alertEmail or "") != "";
     resources = mailServerConfig.resources or {};
   };
 
