@@ -185,7 +185,7 @@ in
       resources = {
         memory = lib.mkOption {
           type = lib.types.int;
-          default = 256;
+          default = 192;
           description = "Redis container memory limit in MB";
         };
 
@@ -219,7 +219,7 @@ in
     resources = {
       memory = lib.mkOption {
         type = lib.types.int;
-        default = 512;
+        default = 384;
         description = "Rspamd container memory limit in MB";
       };
 

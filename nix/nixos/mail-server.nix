@@ -121,6 +121,33 @@ in
       description = "Enable DNS-based SMTP filters (rDNS, FCrDNS, dyndns check). Disable for testing without proper DNS.";
     };
 
+    # Container resource limits (memory in MB)
+    resources = {
+      opensmtpd.memory = lib.mkOption {
+        type = lib.types.int;
+        default = 192;
+        description = "OpenSMTPd container memory limit in MB";
+      };
+
+      dovecot.memory = lib.mkOption {
+        type = lib.types.int;
+        default = 192;
+        description = "Dovecot container memory limit in MB";
+      };
+
+      rspamd.memory = lib.mkOption {
+        type = lib.types.int;
+        default = 384;
+        description = "Rspamd container memory limit in MB";
+      };
+
+      redis.memory = lib.mkOption {
+        type = lib.types.int;
+        default = 192;
+        description = "Redis container memory limit in MB";
+      };
+    };
+
   };
 
   config = lib.mkIf cfg.enable {
@@ -183,6 +210,10 @@ in
       # Network: rspamd-external (filtered egress), internal (milter/learning), rspamd-redis
       networking.networks = [ "mail-rspamd-external" "mail-internal" "mail-rspamd-redis" ];
       redis.networking.networks = [ "mail-rspamd-redis" ];
+
+      # Resource limits
+      resources.memory = cfg.resources.rspamd.memory;
+      redis.resources.memory = cfg.resources.redis.memory;
     };
 
     # === Dovecot Configuration ===
@@ -199,6 +230,9 @@ in
       # Network: imap-external (port publishing, egress blocked), internal (LMTP delivery, spam learning)
       networking.networks = [ "mail-imap-external" "mail-internal" ];
       networking.publishPorts = [ "993:993" "143:143" ];
+
+      # Resource limits
+      resources.memory = cfg.resources.dovecot.memory;
     };
 
     # === OpenSMTPd Configuration ===
@@ -230,6 +264,9 @@ in
       # Port for local system mail (Monit alerts, etc.) bound to localhost only
       networking.publishPorts = [ "25:25" "587:587" ]
         ++ lib.optional cfg.localSubmission.enable "127.0.0.1:${toString cfg.localSubmission.port}:${toString cfg.localSubmission.port}";
+
+      # Resource limits
+      resources.memory = cfg.resources.opensmtpd.memory;
     };
 
     # === Service Ordering ===

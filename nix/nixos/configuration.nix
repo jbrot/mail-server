@@ -193,15 +193,11 @@
     hostname = mailServerConfig.hostname;
     users = mailServerConfig.users or {};
     aliases = mailServerConfig.aliases or {};
-    dkim = {
-      enable = mailServerConfig.dkim.enable or false;
-      selector = mailServerConfig.dkim.selector or "mail";
+    dkim = (mailServerConfig.dkim or {}) // {
       route53ZoneId = mailServerConfig.aws.route53ZoneId or "";
     };
-    localSubmission = {
-      enable = mailServerConfig.localSubmission.enable or true;
-      port = mailServerConfig.localSubmission.port or 10025;
-    };
+    localSubmission = mailServerConfig.localSubmission or {};
+    resources = mailServerConfig.resources or {};
   };
 
   # === Mail DNS Records (SPF/DMARC for Terraform) ===

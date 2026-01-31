@@ -80,4 +80,14 @@
     # Whether to create MX record (set false during migration, true when ready to go live)
     route53CreateMX = false;
   };
+
+  # Container resource limits (memory in MB)
+  # Defaults are tuned for t3.micro (1GB RAM) or t3.nano (512MB + 1GB swap)
+  # Increase for larger instances or heavier workloads
+  resources = {
+    opensmtpd.memory = 192;
+    dovecot.memory = 192;
+    rspamd.memory = 384;
+    redis.memory = 192;
+  };
 }

@@ -317,7 +317,7 @@ in
     resources = {
       memory = lib.mkOption {
         type = lib.types.int;
-        default = 512;
+        default = 192;
         description = "Container memory limit in MB";
       };
 
