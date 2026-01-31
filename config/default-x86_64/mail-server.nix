@@ -77,6 +77,11 @@
       createMX = false;
     };
 
+    # Elastic IP allocation ID for static IP / reverse DNS (optional)
+    # Get your allocation ID with: aws ec2 describe-addresses
+    # Set PTR record with: aws ec2 modify-address-attribute --allocation-id <id> --domain-name <hostname>
+    # eipAllocationId = "eipalloc-0123456789abcdef0";
+
     # Automated EBS snapshots via AWS Data Lifecycle Manager
     # Cost: ~$0.15-0.25/month for a small mail server
     backup = {

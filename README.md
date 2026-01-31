@@ -163,6 +163,9 @@ Required DNS records (created automatically):
       createMX = false;  # Set true when ready to receive mail
     };
 
+    # Elastic IP for static IP / rDNS (optional)
+    eipAllocationId = "";  # e.g., "eipalloc-0123456789abcdef0"
+
     backup = {
       enable = true;
       time = "03:00";      # UTC

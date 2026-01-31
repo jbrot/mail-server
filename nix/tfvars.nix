@@ -43,6 +43,9 @@ let
     backup_daily_retain = ${toString (mailServerConfig.aws.backup.daily.retain or 7)}
     backup_weekly_retain = ${toString (mailServerConfig.aws.backup.weekly.retain or 4)}
     backup_time         = "${mailServerConfig.aws.backup.time or "03:00"}"
+
+    # Elastic IP (optional - for static IP / rDNS)
+    eip_allocation_id = "${mailServerConfig.aws.eipAllocationId or ""}"
   '';
 in
 pkgs.writeText "from-nix.tfvars" tfvarsContent

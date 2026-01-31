@@ -175,6 +175,27 @@ resource "aws_volume_attachment" "data" {
   instance_id = aws_instance.mail_server.id
 }
 
+# =============================================================================
+# Elastic IP (optional - for static IP / rDNS)
+# =============================================================================
+
+# Data source to get existing EIP details
+data "aws_eip" "mail_server" {
+  count = var.eip_allocation_id != "" ? 1 : 0
+  id    = var.eip_allocation_id
+}
+
+# Associate existing EIP with instance
+resource "aws_eip_association" "mail_server" {
+  count         = var.eip_allocation_id != "" ? 1 : 0
+  instance_id   = aws_instance.mail_server.id
+  allocation_id = var.eip_allocation_id
+}
+
+# =============================================================================
+# Route53 DNS
+# =============================================================================
+
 # Route53 hosted zone - use existing or create new
 resource "aws_route53_zone" "mail_domain" {
   count = var.route53_zone_id == "" ? 1 : 0
@@ -184,6 +205,9 @@ resource "aws_route53_zone" "mail_domain" {
 locals {
   # Use existing zone ID if provided, otherwise use created zone
   zone_id = var.route53_zone_id != "" ? var.route53_zone_id : aws_route53_zone.mail_domain[0].zone_id
+
+  # Use EIP if provided, otherwise use instance's auto-assigned IP
+  public_ip = var.eip_allocation_id != "" ? data.aws_eip.mail_server[0].public_ip : aws_instance.mail_server.public_ip
 }
 
 # Route53 A record for mail server hostname
@@ -192,7 +216,7 @@ resource "aws_route53_record" "mail_server" {
   name    = var.hostname
   type    = "A"
   ttl     = 300
-  records = [aws_instance.mail_server.public_ip]
+  records = [local.public_ip]
 }
 
 # MX record pointing to the mail server (optional - for migration)

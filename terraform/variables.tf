@@ -108,3 +108,10 @@ variable "backup_time" {
   type        = string
   default     = "03:00"
 }
+
+# Elastic IP
+variable "eip_allocation_id" {
+  description = "Existing Elastic IP allocation ID (empty = use auto-assigned IP)"
+  type        = string
+  default     = ""
+}

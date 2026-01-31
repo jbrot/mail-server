@@ -5,12 +5,12 @@ output "instance_id" {
 
 output "instance_public_ip" {
   description = "Public IP address of the mail server"
-  value       = aws_instance.mail_server.public_ip
+  value       = local.public_ip
 }
 
 output "ssh_command" {
   description = "SSH command to connect to the mail server"
-  value       = "ssh root@${aws_instance.mail_server.public_ip}"
+  value       = "ssh root@${local.public_ip}"
 }
 
 output "data_volume_id" {
@@ -41,7 +41,7 @@ output "dns_zone_nameservers" {
 
 output "dns_a_record" {
   description = "A record created for mail server"
-  value       = "${var.hostname} -> ${aws_instance.mail_server.public_ip}"
+  value       = "${var.hostname} -> ${local.public_ip}"
 }
 
 output "dns_mx_record" {
