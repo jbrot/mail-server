@@ -165,7 +165,7 @@
   # alertEmail: username (domain added automatically), unset or "" to disable
   services.monitAlerts = {
     enable = true;
-    alertEmail = lib.optionalString ((mailServerConfig.alertEmail or "") != "")
+    alert.email = lib.optionalString ((mailServerConfig.alertEmail or "") != "")
       "${mailServerConfig.alertEmail}@${mailServerConfig.domain}";
   };
 

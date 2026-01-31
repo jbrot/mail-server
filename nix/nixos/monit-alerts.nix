@@ -2,20 +2,20 @@
 # nix/nixos/monit-alerts.nix
 #
 # Provides system and filesystem monitoring with email alerts.
-# Thresholds are configurable for testability.
+# Options are grouped by alert type for clarity.
 
 { config, lib, pkgs, ... }:
 
 let
   cfg = config.services.monitAlerts;
 
-  # Generate filesystem check blocks from the filesystems attrset
+  # Generate filesystem check blocks from the filesystem targets attrset
   filesystemChecks = lib.concatStringsSep "\n" (
     lib.mapAttrsToList (name: path: ''
       check filesystem ${name} with path ${path}
-        if space usage > ${toString cfg.thresholds.diskSpace}% then alert
-        if inode usage > ${toString cfg.thresholds.inodeUsage}% then alert
-    '') cfg.filesystems
+        if space usage > ${toString cfg.filesystems.spaceThreshold}% then alert
+        if inode usage > ${toString cfg.filesystems.inodeThreshold}% then alert
+    '') cfg.filesystems.targets
   );
 
   # Script to check container memory usage
@@ -86,21 +86,29 @@ let
     map (name: ''
       check program ${name} with path "${serviceCheckScript} ${name}.service"
         if status != 0 then alert
-    '') cfg.services
+    '') cfg.services.targets
   );
 
   # Generate container memory check blocks
   containerMemoryChecks = lib.concatStringsSep "\n" (
     map (name: ''
-      check program ${name}-memory with path "${containerMemoryScript} ${name} ${toString cfg.thresholds.containerMemory}"
+      check program ${name}-memory with path "${containerMemoryScript} ${name} ${toString cfg.containers.memoryThreshold}"
         if status != 0 then alert
-    '') cfg.containers
+    '') cfg.containers.targets
   );
 
   # OOM kill check (looks back 2x check interval to avoid missing events)
-  oomCheck = lib.optionalString cfg.oomKillAlert ''
+  oomCheck = lib.optionalString cfg.oom.enable ''
     check program oom-killer with path "${oomCheckScript} '${toString (cfg.checkInterval * 2)} seconds ago'"
       if status != 0 then alert
+  '';
+
+  # System checks (memory, swap, load average)
+  systemCheck = lib.optionalString cfg.system.enable ''
+    check system $HOST
+      if loadavg (5min) > ${toString cfg.system.loadAvgThreshold} then alert
+      if memory usage > ${toString cfg.system.memoryThreshold}% then alert
+      if swap usage > ${toString cfg.system.swapThreshold}% then alert
   '';
 
   # Build the monit config from options
@@ -109,16 +117,16 @@ let
     set daemon ${toString cfg.checkInterval}
 
     # HTTP interface (required for monit CLI commands like 'monit status')
-    set httpd port 2812 and
+    set httpd port ${toString cfg.port} and
       use address localhost
       allow localhost
 
-${lib.optionalString (cfg.alertEmail != "") ''
+${lib.optionalString (cfg.alert.email != "") ''
     # Mail server configuration
-    set mailserver ${cfg.mailServer}
+    set mailserver ${cfg.alert.mailServer}
 
     # Alert recipient (repeat alerts while problem persists)
-    set alert ${cfg.alertEmail} with reminder on ${toString cfg.reminderCycles} cycles
+    set alert ${cfg.alert.email} with reminder on ${toString cfg.alert.reminderCycles} cycles
 
     # Event queue for when mail server is temporarily unavailable
     set eventqueue
@@ -127,10 +135,7 @@ ${lib.optionalString (cfg.alertEmail != "") ''
 ''}
 
     # === System checks ===
-    check system $HOST
-      if loadavg (5min) > ${toString cfg.thresholds.loadAvg} then alert
-      if memory usage > ${toString cfg.thresholds.memoryUsage}% then alert
-      if swap usage > ${toString cfg.thresholds.swapUsage}% then alert
+    ${systemCheck}
 
     # === Filesystem checks ===
     ${filesystemChecks}
@@ -152,96 +157,124 @@ in
   options.services.monitAlerts = {
     enable = lib.mkEnableOption "Monit system alerts";
 
-    alertEmail = lib.mkOption {
-      type = lib.types.str;
-      default = "";
-      description = "Email address for alert notifications (empty string to disable email alerts)";
-    };
-
-    mailServer = lib.mkOption {
-      type = lib.types.str;
-      default = "localhost port 10025";
-      description = "SMTP server for sending alerts. Default uses local submission port (bypasses spam filtering).";
-    };
-
     checkInterval = lib.mkOption {
       type = lib.types.int;
       default = 60;
       description = "Check interval in seconds";
     };
 
-    reminderCycles = lib.mkOption {
+    port = lib.mkOption {
       type = lib.types.int;
-      default = 720;
-      description = "Repeat alert every N cycles while problem persists (720 = 12h at 60s interval)";
+      default = 2812;
+      description = "HTTP port for monit CLI commands (localhost only)";
     };
 
-    thresholds = {
-      diskSpace = lib.mkOption {
-        type = lib.types.int;
-        default = 80;
-        description = "Disk space usage percentage to trigger alert";
+    # === Alert delivery options ===
+    alert = {
+      email = lib.mkOption {
+        type = lib.types.str;
+        default = "";
+        description = "Email address for alert notifications (empty string to disable email alerts)";
       };
 
-      inodeUsage = lib.mkOption {
-        type = lib.types.int;
-        default = 80;
-        description = "Inode usage percentage to trigger alert";
+      mailServer = lib.mkOption {
+        type = lib.types.str;
+        default = "localhost port 10025";
+        description = "SMTP server for sending alerts. Default uses local submission port (bypasses spam filtering).";
       };
 
-      memoryUsage = lib.mkOption {
+      reminderCycles = lib.mkOption {
+        type = lib.types.int;
+        default = 720;
+        description = "Repeat alert every N cycles while problem persists (720 = 12h at 60s interval)";
+      };
+    };
+
+    # === System resource alerts ===
+    system = {
+      enable = lib.mkOption {
+        type = lib.types.bool;
+        default = true;
+        description = "Enable system resource monitoring (memory, swap, load average)";
+      };
+
+      memoryThreshold = lib.mkOption {
         type = lib.types.int;
         default = 90;
         description = "Memory usage percentage to trigger alert";
       };
 
-      swapUsage = lib.mkOption {
+      swapThreshold = lib.mkOption {
         type = lib.types.int;
         default = 50;
         description = "Swap usage percentage to trigger alert";
       };
 
-      loadAvg = lib.mkOption {
+      loadAvgThreshold = lib.mkOption {
         type = lib.types.int;
         default = 4;
         description = "5-minute load average to trigger alert";
       };
+    };
 
-      containerMemory = lib.mkOption {
+    # === Filesystem alerts ===
+    filesystems = {
+      targets = lib.mkOption {
+        type = lib.types.attrsOf lib.types.str;
+        default = {
+          rootfs = "/";
+          data = "/data";
+        };
+        example = { rootfs = "/"; data = "/data"; };
+        description = "Filesystems to monitor (name = path)";
+      };
+
+      spaceThreshold = lib.mkOption {
+        type = lib.types.int;
+        default = 80;
+        description = "Disk space usage percentage to trigger alert";
+      };
+
+      inodeThreshold = lib.mkOption {
+        type = lib.types.int;
+        default = 80;
+        description = "Inode usage percentage to trigger alert";
+      };
+    };
+
+    # === Systemd service alerts ===
+    services = {
+      targets = lib.mkOption {
+        type = lib.types.listOf lib.types.str;
+        default = [];
+        example = [ "podman-opensmtpd" "podman-dovecot" "podman-rspamd" "podman-rspamd-redis" ];
+        description = "Systemd services to monitor (alert if not active or has restarted)";
+      };
+    };
+
+    # === Container memory alerts ===
+    containers = {
+      targets = lib.mkOption {
+        type = lib.types.listOf lib.types.str;
+        default = [];
+        example = [ "opensmtpd" "dovecot" "rspamd" "rspamd-redis" ];
+        description = "Podman containers to monitor for memory usage";
+      };
+
+      memoryThreshold = lib.mkOption {
         type = lib.types.int;
         default = 80;
         description = "Container memory usage percentage to trigger alert";
       };
     };
 
-    filesystems = lib.mkOption {
-      type = lib.types.attrsOf lib.types.str;
-      default = {
-        rootfs = "/";
-        data = "/data";
+    # === OOM kill detection ===
+    oom = {
+      enable = lib.mkOption {
+        type = lib.types.bool;
+        default = true;
+        description = "Alert when OOM killer terminates a process";
       };
-      example = { rootfs = "/"; data = "/data"; };
-      description = "Filesystems to monitor (name = path)";
-    };
-
-    services = lib.mkOption {
-      type = lib.types.listOf lib.types.str;
-      default = [];
-      example = [ "podman-opensmtpd" "podman-dovecot" "podman-rspamd" "podman-rspamd-redis" ];
-      description = "Systemd services to monitor (alert if not active)";
-    };
-
-    containers = lib.mkOption {
-      type = lib.types.listOf lib.types.str;
-      default = [];
-      example = [ "opensmtpd" "dovecot" "rspamd" "rspamd-redis" ];
-      description = "Podman containers to monitor for memory usage";
-    };
-
-    oomKillAlert = lib.mkOption {
-      type = lib.types.bool;
-      default = true;
-      description = "Alert when OOM killer terminates a process";
     };
 
     extraConfig = lib.mkOption {

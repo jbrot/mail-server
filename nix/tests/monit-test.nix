@@ -37,32 +37,34 @@ pkgs.testers.runNixOSTest {
     # Configure Monit with test-friendly settings
     services.monitAlerts = {
       enable = true;
-      # No alertEmail - disables email alerts for unit testing
+      # No alert.email - disables email alerts for unit testing
       checkInterval = 1;  # Very fast checks for testing
 
       # Only monitor our test filesystem (not / or /data)
       filesystems = {
-        testfs = "/mnt/testfs";
+        targets = { testfs = "/mnt/testfs"; };
+        spaceThreshold = 50;  # Alert when >50% full
+        inodeThreshold = 80;
+      };
+
+      # System thresholds set high so they don't trigger during tests
+      system = {
+        memoryThreshold = 99;
+        swapThreshold = 99;
+        loadAvgThreshold = 100;
       };
 
       # Monitor a test service for restart detection
-      services = [ "test-service" ];
+      services.targets = [ "test-service" ];
 
       # Monitor test container for memory usage
-      containers = [ "test-container" ];
+      containers = {
+        targets = [ "test-container" ];
+        memoryThreshold = 1;  # Very low - any usage triggers alert
+      };
 
       # Enable OOM kill detection
-      oomKillAlert = true;
-
-      # Set low threshold so we can trigger it easily
-      thresholds = {
-        diskSpace = 50;  # Alert when >50% full
-        inodeUsage = 80;
-        memoryUsage = 99;  # High so it doesn't trigger
-        swapUsage = 99;
-        loadAvg = 100;
-        containerMemory = 1;  # Very low - any usage triggers alert
-      };
+      oom.enable = true;
     };
 
     # Create mount point and mount tiny tmpfs for testing

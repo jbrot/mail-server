@@ -80,21 +80,21 @@ pkgs.testers.runNixOSTest {
     # === Monit Alerting Configuration ===
     services.monitAlerts = {
       enable = true;
-      alertEmail = "testuser@test.local";
+      alert.email = "testuser@test.local";
       checkInterval = 5;  # Fast checks for testing
 
       # Only monitor our test filesystem (not / or /data)
       filesystems = {
-        testfs = "/mnt/testfs";
+        targets = { testfs = "/mnt/testfs"; };
+        spaceThreshold = 50;  # Alert when >50% full
+        inodeThreshold = 80;
       };
 
-      # Set low threshold so we can trigger it easily
-      thresholds = {
-        diskSpace = 50;  # Alert when >50% full
-        inodeUsage = 80;
-        memoryUsage = 99;  # High so it doesn't trigger
-        swapUsage = 99;
-        loadAvg = 100;
+      # System thresholds set high so they don't trigger during tests
+      system = {
+        memoryThreshold = 99;
+        swapThreshold = 99;
+        loadAvgThreshold = 100;
       };
     };
 

@@ -160,7 +160,7 @@ in
     # === Monit Container Monitoring ===
     # Add container services to Monit for failure alerting
     # Monit's event queue handles the case where OpenSMTPd itself fails
-    services.monitAlerts.services = [
+    services.monitAlerts.services.targets = [
       "podman-opensmtpd"
       "podman-dovecot"
       "podman-rspamd"
@@ -168,7 +168,7 @@ in
     ];
 
     # Monitor container memory usage
-    services.monitAlerts.containers = [
+    services.monitAlerts.containers.targets = [
       "opensmtpd"
       "dovecot"
       "rspamd"
