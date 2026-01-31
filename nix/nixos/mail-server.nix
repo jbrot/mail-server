@@ -140,6 +140,14 @@ in
       "podman-rspamd-redis"
     ];
 
+    # Monitor container memory usage
+    services.monitAlerts.containers = [
+      "opensmtpd"
+      "dovecot"
+      "rspamd"
+      "rspamd-redis"
+    ];
+
     # === DKIM Key Manager ===
     services.dkimKeyManager = {
       enable = cfg.dkim.enable;

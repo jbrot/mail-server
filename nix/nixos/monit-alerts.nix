@@ -18,6 +18,47 @@ let
     '') cfg.filesystems
   );
 
+  # Script to check container memory usage
+  # Returns non-zero if container memory usage exceeds threshold
+  containerMemoryScript = pkgs.writeShellScript "check-container-memory" ''
+    CONTAINER="$1"
+    THRESHOLD="$2"
+
+    # Get memory usage percentage from podman stats
+    MEM_PCT=$(${pkgs.podman}/bin/podman stats --no-stream --format "{{.MemPerc}}" "$CONTAINER" 2>/dev/null | tr -d '%')
+
+    if [ -z "$MEM_PCT" ]; then
+      echo "Container $CONTAINER not found or not running"
+      exit 1
+    fi
+
+    # Compare as integers (remove decimal part)
+    MEM_INT=''${MEM_PCT%.*}
+    if [ "$MEM_INT" -ge "$THRESHOLD" ]; then
+      echo "Container $CONTAINER memory usage is ''${MEM_PCT}% (threshold: ''${THRESHOLD}%)"
+      exit 2
+    fi
+
+    echo "Container $CONTAINER memory usage is ''${MEM_PCT}%"
+    exit 0
+  '';
+
+  # Script to check for recent OOM kills in the kernel journal
+  # Returns non-zero if OOM kill detected in the last check interval
+  oomCheckScript = pkgs.writeShellScript "check-oom-kills" ''
+    SINCE="$1"
+
+    # Check kernel messages for OOM kills
+    OOM_MSG=$(${pkgs.systemd}/bin/journalctl -k --since "$SINCE" 2>/dev/null | grep -i "out of memory\|oom-kill\|killed process")
+
+    if [ -n "$OOM_MSG" ]; then
+      echo "OOM kill detected: $OOM_MSG"
+      exit 1
+    fi
+
+    exit 0
+  '';
+
   # Script to check systemd service health
   # Returns non-zero if service is not active OR has been restarted (NRestarts > 0)
   # Admin can clear restart count with: systemctl reset-failed <service>
@@ -47,6 +88,20 @@ let
         if status != 0 then alert
     '') cfg.services
   );
+
+  # Generate container memory check blocks
+  containerMemoryChecks = lib.concatStringsSep "\n" (
+    map (name: ''
+      check program ${name}-memory with path "${containerMemoryScript} ${name} ${toString cfg.thresholds.containerMemory}"
+        if status != 0 then alert
+    '') cfg.containers
+  );
+
+  # OOM kill check (looks back 2x check interval to avoid missing events)
+  oomCheck = lib.optionalString cfg.oomKillAlert ''
+    check program oom-killer with path "${oomCheckScript} '${toString (cfg.checkInterval * 2)} seconds ago'"
+      if status != 0 then alert
+  '';
 
   # Build the monit config from options
   monitConfig = ''
@@ -82,6 +137,12 @@ ${lib.optionalString (cfg.alertEmail != "") ''
 
     # === Service checks ===
     ${serviceChecks}
+
+    # === Container memory checks ===
+    ${containerMemoryChecks}
+
+    # === OOM kill detection ===
+    ${oomCheck}
 
     ${cfg.extraConfig}
   '';
@@ -145,6 +206,12 @@ in
         default = 4;
         description = "5-minute load average to trigger alert";
       };
+
+      containerMemory = lib.mkOption {
+        type = lib.types.int;
+        default = 80;
+        description = "Container memory usage percentage to trigger alert";
+      };
     };
 
     filesystems = lib.mkOption {
@@ -162,6 +229,19 @@ in
       default = [];
       example = [ "podman-opensmtpd" "podman-dovecot" "podman-rspamd" "podman-rspamd-redis" ];
       description = "Systemd services to monitor (alert if not active)";
+    };
+
+    containers = lib.mkOption {
+      type = lib.types.listOf lib.types.str;
+      default = [];
+      example = [ "opensmtpd" "dovecot" "rspamd" "rspamd-redis" ];
+      description = "Podman containers to monitor for memory usage";
+    };
+
+    oomKillAlert = lib.mkOption {
+      type = lib.types.bool;
+      default = true;
+      description = "Alert when OOM killer terminates a process";
     };
 
     extraConfig = lib.mkOption {

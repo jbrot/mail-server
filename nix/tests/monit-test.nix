@@ -1,14 +1,38 @@
 # Monit alerting unit tests
-# Verifies: disk space detection, service monitoring, restart detection
+# Verifies: disk space detection, service monitoring, restart detection,
+#           container memory monitoring, OOM kill detection
 # nix/tests/monit-test.nix
 
 { pkgs, ... }:
 
+let
+  # Build a minimal test container image with coreutils for dd/sleep
+  testContainerImage = pkgs.dockerTools.buildLayeredImage {
+    name = "test-container";
+    tag = "latest";
+    contents = [
+      pkgs.coreutils
+      pkgs.bash
+    ];
+    config = {
+      Cmd = [ "${pkgs.coreutils}/bin/sleep" "infinity" ];
+    };
+  };
+in
 pkgs.testers.runNixOSTest {
   name = "monit-alerts";
 
   nodes.machine = { config, pkgs, lib, ... }: {
     imports = [ ../nixos/monit-alerts.nix ];
+
+    # Enable podman for container tests
+    virtualisation.podman.enable = true;
+
+    # Disable panic_on_oom so OOM kills don't crash the VM
+    boot.kernel.sysctl."vm.panic_on_oom" = 0;
+
+    # Make test container image available in VM filesystem
+    environment.etc."test-container-image".source = testContainerImage;
 
     # Configure Monit with test-friendly settings
     services.monitAlerts = {
@@ -24,6 +48,12 @@ pkgs.testers.runNixOSTest {
       # Monitor a test service for restart detection
       services = [ "test-service" ];
 
+      # Monitor test container for memory usage
+      containers = [ "test-container" ];
+
+      # Enable OOM kill detection
+      oomKillAlert = true;
+
       # Set low threshold so we can trigger it easily
       thresholds = {
         diskSpace = 50;  # Alert when >50% full
@@ -31,6 +61,7 @@ pkgs.testers.runNixOSTest {
         memoryUsage = 99;  # High so it doesn't trigger
         swapUsage = 99;
         loadAvg = 100;
+        containerMemory = 1;  # Very low - any usage triggers alert
       };
     };
 
@@ -244,6 +275,135 @@ pkgs.testers.runNixOSTest {
         print(f"Status after explicit restart: {status}")
         assert re.search(r"status\s+OK", status), f"Expected OK status after explicit restart, got: {status}"
         print("PASS: Explicit restart does not trigger alert")
+
+    # Load test container image for container tests
+    with subtest("Load test container image"):
+        machine.succeed("podman load < /etc/test-container-image")
+        images = machine.succeed("podman images")
+        print(f"Loaded images:\n{images}")
+        assert "test-container" in images, "test-container image not loaded"
+        print("PASS: Test container image loaded")
+
+    # Test 10: Container memory monitoring (container not running)
+    with subtest("Container memory check detects missing container"):
+        # Find the container memory check script (extract path from the test-container-memory check line)
+        check_script = machine.succeed("grep 'check program test-container-memory' /etc/monitrc | grep -oP '(?<=with path \")[^\"]+'"
+        ).strip()
+        print(f"Container memory check script: {check_script}")
+
+        # Test script when container doesn't exist (should return 1)
+        exit_code, output = machine.execute(check_script)
+        print(f"Script output (no container): {output}, exit code: {exit_code}")
+        assert exit_code == 1, f"Expected exit 1 for missing container, got {exit_code}"
+        print("PASS: Container memory check detects missing container")
+
+    # Test 11: Container memory monitoring triggers alert when threshold exceeded
+    with subtest("Container memory check triggers Monit alert"):
+        # Create and start a container that uses memory (dd allocates buffer)
+        # Use --memory to set a limit so we can calculate percentage reliably
+        machine.succeed("podman run -d --name test-container --memory=64m test-container:latest sh -c 'dd if=/dev/zero of=/dev/shm/fill bs=1M count=32 && sleep infinity'")
+
+        # Wait for container to start and allocate memory
+        time.sleep(3)
+
+        # Verify container is running
+        container_status = machine.succeed("podman ps --filter name=test-container --format '{{.Status}}'")
+        print(f"Container status: {container_status}")
+        assert "Up" in container_status, f"Container not running: {container_status}"
+
+        # Check memory usage
+        mem_usage = machine.succeed("podman stats --no-stream --format '{{.MemPerc}}' test-container")
+        print(f"Container memory usage: {mem_usage}")
+
+        # Test script - should return 2 (over threshold, since threshold is 1%)
+        exit_code, output = machine.execute(check_script)
+        print(f"Script output (running): {output}, exit code: {exit_code}")
+        assert exit_code == 2, f"Expected exit 2 (over threshold), got {exit_code}"
+
+        # Wait for Monit check cycle
+        time.sleep(3)
+
+        # Check Monit status - should show failure status (threshold exceeded)
+        status = machine.succeed("monit status test-container-memory")
+        print(f"Container memory Monit status: {status}")
+        assert re.search(r"status\s+Status failed", status), f"Expected 'Status failed' in Monit, got: {status}"
+        print("PASS: Container memory alert triggered in Monit")
+
+        # Clean up container
+        machine.succeed("podman stop test-container && podman rm test-container")
+
+    # Test 12: OOM kill detection shows OK in Monit when no OOM kills
+    with subtest("OOM check shows OK in Monit when no OOM kills"):
+        # Find the OOM check script (extract path from the oom-killer check line)
+        oom_script = machine.succeed("grep 'check program oom-killer' /etc/monitrc | grep -oP '(?<=with path \")[^\"]+'"
+        ).strip()
+        print(f"OOM check script: {oom_script}")
+
+        # Test script with no recent OOM kills (should return 0)
+        exit_code, output = machine.execute(oom_script)
+        print(f"OOM script output: {output}, exit code: {exit_code}")
+        assert exit_code == 0, f"Expected exit 0 (no OOM), got {exit_code}"
+
+        # Wait for Monit check cycle
+        time.sleep(3)
+
+        # Verify Monit shows OK status
+        status = machine.succeed("monit status oom-killer")
+        print(f"OOM Monit status: {status}")
+        assert re.search(r"status\s+OK", status), f"Expected OK status in Monit, got: {status}"
+        print("PASS: OOM check shows OK in Monit when no OOM kills")
+
+    # Test 13: OOM kill detection triggers Monit alert (transient)
+    # The OOM check looks back (checkInterval * 2) = 2 seconds, so alert is transient
+    with subtest("OOM check triggers transient Monit alert when OOM kill occurs"):
+        # Run a container with very limited memory that will OOM
+        print("Starting memory-limited container that will OOM...")
+
+        # Start container with 6MB limit and run a memory hog
+        # dd tries to allocate a 32MB buffer which will trigger OOM
+        exit_code, output = machine.execute(
+            "podman run --rm --name oom-test --memory=6m test-container:latest "
+            "dd if=/dev/zero of=/dev/shm/fill bs=32M count=1 2>&1 || true"
+        )
+        print(f"OOM container output: {output}")
+
+        # Check kernel log for OOM message immediately - this MUST exist
+        oom_log = machine.succeed("journalctl -k --since '10 seconds ago' 2>/dev/null | grep -iE 'oom|killed process|out of memory' || true")
+        print(f"Kernel OOM log: {oom_log}")
+        assert oom_log.strip(), "OOM kill did not occur - test requires OOM to trigger"
+
+        # Immediately verify the script detects the OOM (within 2 second window)
+        exit_code, output = machine.execute(oom_script)
+        print(f"OOM script immediately after kill: {output}, exit code: {exit_code}")
+        assert exit_code == 1, f"Expected exit 1 (OOM detected), got {exit_code}"
+
+        # Wait for Monit check cycle to pick up the alert
+        time.sleep(2)
+
+        # Verify Monit shows failed status
+        status = machine.succeed("monit status oom-killer")
+        print(f"OOM Monit status after kill: {status}")
+        assert re.search(r"status\s+Status failed", status), f"Expected 'Status failed' in Monit after OOM, got: {status}"
+        print("PASS: OOM kill detected and Monit alert triggered")
+
+        # Now wait for the OOM to fall outside the 2-second detection window
+        # With checkInterval=1, the script looks back 2 seconds, so wait 3 seconds
+        print("Waiting for OOM to fall outside detection window...")
+        time.sleep(3)
+
+        # Verify the script no longer detects the OOM
+        exit_code, output = machine.execute(oom_script)
+        print(f"OOM script after window expires: {output}, exit code: {exit_code}")
+        assert exit_code == 0, f"Expected exit 0 (OOM outside window), got {exit_code}"
+
+        # Wait for Monit check cycle to see the recovery
+        time.sleep(2)
+
+        # Verify Monit shows OK status again
+        status = machine.succeed("monit status oom-killer")
+        print(f"OOM Monit status after window expires: {status}")
+        assert re.search(r"status\s+OK", status), f"Expected OK status in Monit after window expires, got: {status}"
+        print("PASS: OOM alert cleared after detection window expired")
 
     print("All Monit detection tests passed!")
   '';
