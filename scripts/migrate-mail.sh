@@ -1,19 +1,16 @@
 #!/usr/bin/env bash
+# Migrate mail from old server to new mail server via local machine
+# Usage: ./scripts/migrate-mail.sh --source user@old-server --source-path /path/to/Maildir --user username
 #
-# Migrate mail data from existing server to new server
-#
-# Usage: ./scripts/migrate-mail.sh --source user@old-server --dest user@new-server
-#
+# Examples:
+#   ./scripts/migrate-mail.sh --source joshua@mail.jbrot.com --user joshua --sudo
+#   ./scripts/migrate-mail.sh --source root@old.example.com --user alice  # defaults to /home/alice/Maildir
+
 set -euo pipefail
 
-# Configuration
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
-
-# Default paths
-SOURCE_MAIL_PATH="${SOURCE_MAIL_PATH:-/data/mail}"
-DEST_MAIL_PATH="${DEST_MAIL_PATH:-/data/mail}"
-RSPAMD_DATA_PATH="${RSPAMD_DATA_PATH:-/data/rspamd}"
+TERRAFORM_DIR="${PROJECT_DIR}/terraform"
 
 # Colors
 RED='\033[0;31m'
@@ -21,212 +18,204 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m'
 
-log_info() {
-    echo -e "${GREEN}[INFO]${NC} $1"
+log_info() { echo -e "${GREEN}[INFO]${NC} $1"; }
+log_warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
+log_error() { echo -e "${RED}[ERROR]${NC} $1" >&2; }
+
+# Run terraform via nix
+run_terraform() {
+    nix run --quiet .#terraform -- "$@"
 }
 
-log_warn() {
-    echo -e "${YELLOW}[WARN]${NC} $1"
+usage() {
+    cat << EOF
+Usage: $(basename "$0") [OPTIONS]
+
+Migrate mail from old server to new mail server via local machine.
+Uses Terraform state to connect to the new server (like ssh.sh).
+
+Options:
+    -h, --help                 Show this help message
+    -s, --source HOST          Source server (e.g., user@mail.old.com)
+    -p, --source-path PATH     Path to Maildir on source (default: /home/<user>/Maildir)
+    -u, --user USERNAME        Mail user to migrate
+    --sudo                     Use sudo on source server to access Maildir
+    -n, --dry-run              Show what would be done without doing it
+
+Examples:
+    $(basename "$0") --source root@mail.jbrot.com --user joshua
+    $(basename "$0") --source root@old.example.com --source-path /var/mail/alice --user alice
+EOF
 }
 
-log_error() {
-    echo -e "${RED}[ERROR]${NC} $1"
-}
+# Parse arguments
+SOURCE_HOST=""
+SOURCE_PATH=""
+MAIL_USER=""
+USE_SUDO=false
+DRY_RUN=false
 
-# Sync mail data
-sync_mail() {
-    local source="$1"
-    local dest="$2"
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        -s|--source)
+            SOURCE_HOST="$2"
+            shift 2
+            ;;
+        -p|--source-path)
+            SOURCE_PATH="$2"
+            shift 2
+            ;;
+        -u|--user)
+            MAIL_USER="$2"
+            shift 2
+            ;;
+        --sudo)
+            USE_SUDO=true
+            shift
+            ;;
+        -n|--dry-run)
+            DRY_RUN=true
+            shift
+            ;;
+        *)
+            log_error "Unknown option: $1"
+            usage
+            exit 1
+            ;;
+    esac
+done
 
-    log_info "Syncing mail data from $source to $dest..."
+# Validate required arguments
+if [[ -z "$SOURCE_HOST" ]]; then
+    log_error "--source is required"
+    usage
+    exit 1
+fi
 
-    # Use rsync with archive mode, preserve permissions
-    rsync -avz --progress \
-        --delete \
-        -e "ssh -o StrictHostKeyChecking=accept-new" \
-        "$source:$SOURCE_MAIL_PATH/" \
-        "$dest:$DEST_MAIL_PATH/"
+if [[ -z "$MAIL_USER" ]]; then
+    log_error "--user is required"
+    usage
+    exit 1
+fi
 
-    log_info "Mail sync complete"
-}
+# Default source path if not specified
+if [[ -z "$SOURCE_PATH" ]]; then
+    SOURCE_PATH="/home/${MAIL_USER}/Maildir"
+fi
 
-# Sync rspamd data (Bayes database, DKIM keys)
-sync_rspamd() {
-    local source="$1"
-    local dest="$2"
+# Get destination server info from Terraform
+log_info "Getting destination server info from Terraform..."
+DEST_IP=$(run_terraform -chdir="$TERRAFORM_DIR" output -raw instance_public_ip 2>/dev/null || echo "")
+if [[ -z "$DEST_IP" ]]; then
+    log_error "Could not get instance IP from Terraform. Have you run 'deploy.sh -o infra'?"
+    exit 1
+fi
 
-    log_info "Syncing Rspamd data from $source to $dest..."
+# Extract private key for destination
+DEST_KEY_FILE=$(mktemp)
+trap "rm -f '$DEST_KEY_FILE'" EXIT
 
-    rsync -avz --progress \
-        -e "ssh -o StrictHostKeyChecking=accept-new" \
-        "$source:$RSPAMD_DATA_PATH/" \
-        "$dest:$RSPAMD_DATA_PATH/"
+if ! run_terraform -chdir="$TERRAFORM_DIR" output -raw private_key > "$DEST_KEY_FILE" 2>/dev/null; then
+    log_error "Could not extract private key from Terraform."
+    exit 1
+fi
+chmod 600 "$DEST_KEY_FILE"
 
-    log_info "Rspamd data sync complete"
-}
+DEST_SSH_OPTS="-i $DEST_KEY_FILE -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new"
+DEST_PATH="/data/mail/${MAIL_USER}"
 
-# Fix permissions on destination
-fix_permissions() {
-    local dest="$1"
+# Summary
+echo ""
+echo "=========================================="
+echo "  Mail Migration"
+echo "=========================================="
+echo "  Source:      ${SOURCE_HOST}:${SOURCE_PATH}"
+echo "  Destination: root@${DEST_IP}:${DEST_PATH}"
+echo "  User:        ${MAIL_USER}"
+echo "  Sudo:        ${USE_SUDO}"
+echo "=========================================="
+echo ""
 
-    log_info "Fixing permissions on $dest..."
+if [[ "$DRY_RUN" == "true" ]]; then
+    log_warn "Dry run mode - no changes will be made"
+    echo ""
+    SUDO_OPT=""
+    [[ "$USE_SUDO" == "true" ]] && SUDO_OPT=" --rsync-path='sudo rsync'"
+    echo "Would execute:"
+    echo "  1. rsync -avz${SUDO_OPT} ${SOURCE_HOST}:${SOURCE_PATH}/ <local-temp>/"
+    echo "  2. rsync -avz <local-temp>/ root@${DEST_IP}:${DEST_PATH}/"
+    echo "  3. ssh root@${DEST_IP} 'chown -R 5000:5000 ${DEST_PATH}'"
+    exit 0
+fi
 
-    ssh "$dest" "chown -R 5000:5000 $DEST_MAIL_PATH && chmod -R 700 $DEST_MAIL_PATH"
-    ssh "$dest" "chown -R 1000:1000 $RSPAMD_DATA_PATH"
+# Confirm
+read -p "Proceed with migration? [y/N] " -n 1 -r
+echo
+if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+    log_info "Aborted"
+    exit 0
+fi
 
-    log_info "Permissions fixed"
-}
+# Test connections
+log_info "Testing SSH connections..."
+if ! ssh -o ConnectTimeout=10 "$SOURCE_HOST" "echo 'Source OK'" 2>/dev/null; then
+    log_error "Cannot connect to source: $SOURCE_HOST"
+    exit 1
+fi
 
-# Verify migration
-verify_migration() {
-    local source="$1"
-    local dest="$2"
+if ! ssh $DEST_SSH_OPTS "root@${DEST_IP}" "echo 'Destination OK'" 2>/dev/null; then
+    log_error "Cannot connect to destination: root@${DEST_IP}"
+    exit 1
+fi
+log_info "Both connections OK"
 
-    log_info "Verifying migration..."
+# Create local temp directory
+LOCAL_TEMP=$(mktemp -d)
+trap "rm -rf '$LOCAL_TEMP' '$DEST_KEY_FILE'" EXIT
+log_info "Using temp directory: $LOCAL_TEMP"
 
-    # Count mailboxes on source
-    local source_count
-    source_count=$(ssh "$source" "find $SOURCE_MAIL_PATH -type d -name 'cur' | wc -l")
+# Step 1: Pull from source to local
+log_info "Step 1/3: Pulling mail from source..."
+RSYNC_OPTS=(-avz --progress)
+if [[ "$USE_SUDO" == "true" ]]; then
+    RSYNC_OPTS+=(--rsync-path="sudo rsync")
+fi
+rsync "${RSYNC_OPTS[@]}" \
+    "${SOURCE_HOST}:${SOURCE_PATH}/" \
+    "${LOCAL_TEMP}/"
 
-    # Count mailboxes on destination
-    local dest_count
-    dest_count=$(ssh "$dest" "find $DEST_MAIL_PATH -type d -name 'cur' | wc -l")
+# Count messages
+MSG_COUNT=$(find "$LOCAL_TEMP" -type f | wc -l)
+log_info "Downloaded $MSG_COUNT files"
 
-    log_info "Source mailboxes: $source_count"
-    log_info "Destination mailboxes: $dest_count"
+# Step 2: Push from local to destination
+log_info "Step 2/3: Pushing mail to destination..."
+ssh $DEST_SSH_OPTS "root@${DEST_IP}" "mkdir -p ${DEST_PATH}"
+rsync -avz --progress \
+    -e "ssh $DEST_SSH_OPTS" \
+    "${LOCAL_TEMP}/" \
+    "root@${DEST_IP}:${DEST_PATH}/"
 
-    if [ "$source_count" -eq "$dest_count" ]; then
-        log_info "Mailbox count matches!"
-    else
-        log_warn "Mailbox count differs. Please verify manually."
-    fi
+# Step 3: Fix ownership
+log_info "Step 3/3: Fixing ownership..."
+ssh $DEST_SSH_OPTS "root@${DEST_IP}" "chown -R 5000:5000 ${DEST_PATH}"
 
-    # Check disk usage
-    log_info "Disk usage comparison:"
-    echo "Source:"
-    ssh "$source" "du -sh $SOURCE_MAIL_PATH"
-    echo "Destination:"
-    ssh "$dest" "du -sh $DEST_MAIL_PATH"
-}
+# Verify
+log_info "Verifying migration..."
+DEST_COUNT=$(ssh $DEST_SSH_OPTS "root@${DEST_IP}" "find ${DEST_PATH} -type f | wc -l")
+log_info "Source files: $MSG_COUNT"
+log_info "Destination files: $DEST_COUNT"
 
-# Main
-main() {
-    local source=""
-    local dest=""
-    local sync_mail_flag=true
-    local sync_rspamd_flag=true
-    local verify_flag=true
-    local dry_run=false
+if [[ "$MSG_COUNT" -eq "$DEST_COUNT" ]]; then
+    log_info "File counts match!"
+else
+    log_warn "File counts differ - please verify manually"
+fi
 
-    # Parse arguments
-    while [ $# -gt 0 ]; do
-        case "$1" in
-            --source)
-                source="$2"
-                shift 2
-                ;;
-            --dest)
-                dest="$2"
-                shift 2
-                ;;
-            --no-mail)
-                sync_mail_flag=false
-                shift
-                ;;
-            --no-rspamd)
-                sync_rspamd_flag=false
-                shift
-                ;;
-            --no-verify)
-                verify_flag=false
-                shift
-                ;;
-            --dry-run)
-                dry_run=true
-                shift
-                ;;
-            *)
-                echo "Usage: $0 --source user@old-server --dest user@new-server [options]"
-                echo ""
-                echo "Options:"
-                echo "  --source HOST     Source server (e.g., root@old-mail.example.com)"
-                echo "  --dest HOST       Destination server (e.g., root@new-mail.example.com)"
-                echo "  --no-mail         Skip mail data sync"
-                echo "  --no-rspamd       Skip Rspamd data sync"
-                echo "  --no-verify       Skip verification"
-                echo "  --dry-run         Show what would be done without doing it"
-                exit 1
-                ;;
-        esac
-    done
-
-    # Validate arguments
-    if [ -z "$source" ] || [ -z "$dest" ]; then
-        log_error "Both --source and --dest are required"
-        exit 1
-    fi
-
-    log_info "Migration plan:"
-    log_info "  Source: $source"
-    log_info "  Destination: $dest"
-    log_info "  Sync mail: $sync_mail_flag"
-    log_info "  Sync rspamd: $sync_rspamd_flag"
-    log_info "  Verify: $verify_flag"
-
-    if [ "$dry_run" = true ]; then
-        log_warn "Dry run mode - no changes will be made"
-        exit 0
-    fi
-
-    # Confirm
-    read -p "Proceed with migration? [y/N] " -n 1 -r
-    echo
-    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-        log_info "Aborted"
-        exit 0
-    fi
-
-    # Test connections
-    log_info "Testing SSH connections..."
-    ssh -o ConnectTimeout=10 "$source" "echo 'Source OK'" || {
-        log_error "Cannot connect to source: $source"
-        exit 1
-    }
-    ssh -o ConnectTimeout=10 "$dest" "echo 'Destination OK'" || {
-        log_error "Cannot connect to destination: $dest"
-        exit 1
-    }
-
-    # Stop services on destination before sync
-    log_info "Stopping mail services on destination..."
-    ssh "$dest" "systemctl stop podman-opensmtpd podman-dovecot || true"
-
-    # Perform sync
-    if [ "$sync_mail_flag" = true ]; then
-        sync_mail "$source" "$dest"
-    fi
-
-    if [ "$sync_rspamd_flag" = true ]; then
-        sync_rspamd "$source" "$dest"
-    fi
-
-    # Fix permissions
-    fix_permissions "$dest"
-
-    # Start services
-    log_info "Starting mail services on destination..."
-    ssh "$dest" "systemctl start podman-rspamd podman-dovecot podman-opensmtpd"
-
-    # Verify
-    if [ "$verify_flag" = true ]; then
-        verify_migration "$source" "$dest"
-    fi
-
-    log_info "Migration complete!"
-    log_warn "Remember to:"
-    log_warn "  1. Test mail sending/receiving on new server"
-    log_warn "  2. Update DNS records when ready"
-    log_warn "  3. Keep old server running as fallback initially"
-}
-
-main "$@"
+echo ""
+log_info "Migration complete!"
+log_warn "Remember to test IMAP access before switching DNS"

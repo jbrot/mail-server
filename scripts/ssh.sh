@@ -40,7 +40,7 @@ if ! run_terraform -chdir="$TERRAFORM_DIR" output -raw private_key > "$SSH_KEY_F
 fi
 chmod 600 "$SSH_KEY_FILE"
 
-SSH_OPTS="-i $SSH_KEY_FILE -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new"
+SSH_OPTS="-i $SSH_KEY_FILE -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new -L 2812:localhost:2812"
 
 if [[ $# -eq 0 ]]; then
     log_info "Connecting to root@${INSTANCE_IP}..."
