@@ -115,6 +115,10 @@ in
         # Try to mount /data
         echo "Mounting /data..."
         ${pkgs.util-linux}/bin/mount /data || true
+
+        # Re-run tmpfiles to create /data subdirectories
+        echo "Creating /data subdirectories..."
+        ${pkgs.systemd}/bin/systemd-tmpfiles --create 2>/dev/null || true
       '';
     };
   };
