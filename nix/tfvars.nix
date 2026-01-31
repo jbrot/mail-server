@@ -37,6 +37,12 @@ let
     # SPF/DMARC settings (validated via checkdmarc, empty = disabled)
     spf_record   = "${spfRecord}"
     dmarc_record = "${dmarcRecord}"
+
+    # Backup settings
+    backup_enabled      = ${if (mailServerConfig.aws.backup.enable or true) then "true" else "false"}
+    backup_daily_retain = ${toString (mailServerConfig.aws.backup.daily.retain or 7)}
+    backup_weekly_retain = ${toString (mailServerConfig.aws.backup.weekly.retain or 4)}
+    backup_time         = "${mailServerConfig.aws.backup.time or "03:00"}"
   '';
 in
 pkgs.writeText "from-nix.tfvars" tfvarsContent

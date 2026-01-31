@@ -83,3 +83,28 @@ variable "dmarc_record" {
   type        = string
   default     = ""
 }
+
+# Backup settings
+variable "backup_enabled" {
+  description = "Enable automated EBS snapshots via Data Lifecycle Manager"
+  type        = bool
+  default     = true
+}
+
+variable "backup_daily_retain" {
+  description = "Number of daily snapshots to retain"
+  type        = number
+  default     = 7
+}
+
+variable "backup_weekly_retain" {
+  description = "Number of weekly snapshots to retain"
+  type        = number
+  default     = 4
+}
+
+variable "backup_time" {
+  description = "Time to run daily backups (UTC, 24h format HH:MM)"
+  type        = string
+  default     = "03:00"
+}

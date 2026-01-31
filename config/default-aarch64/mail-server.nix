@@ -77,6 +77,15 @@
       # Whether to create MX record (set false during migration, true when ready to go live)
       createMX = false;
     };
+
+    # Automated EBS snapshots via AWS Data Lifecycle Manager
+    # Cost: ~$0.15-0.25/month for a small mail server
+    backup = {
+      enable = true;
+      time = "03:00";  # UTC, 24h format
+      daily.retain = 7;   # Keep 7 daily snapshots
+      weekly.retain = 4;  # Keep 4 weekly snapshots (Sundays)
+    };
   };
 
   # Container resource limits (memory in MB)

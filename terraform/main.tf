@@ -277,3 +277,114 @@ resource "aws_iam_instance_profile" "mail_server" {
   name = "${var.project}-mail-server"
   role = aws_iam_role.mail_server.name
 }
+
+# =============================================================================
+# EBS Backup via Data Lifecycle Manager
+# =============================================================================
+
+# IAM role for DLM
+resource "aws_iam_role" "dlm" {
+  count = var.backup_enabled ? 1 : 0
+  name  = "${var.project}-dlm-lifecycle"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Action = "sts:AssumeRole"
+      Effect = "Allow"
+      Principal = { Service = "dlm.amazonaws.com" }
+    }]
+  })
+}
+
+resource "aws_iam_role_policy" "dlm" {
+  count = var.backup_enabled ? 1 : 0
+  name  = "${var.project}-dlm-policy"
+  role  = aws_iam_role.dlm[0].id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "ec2:CreateSnapshot",
+          "ec2:CreateSnapshots",
+          "ec2:DeleteSnapshot",
+          "ec2:DescribeVolumes",
+          "ec2:DescribeInstances",
+          "ec2:DescribeSnapshots"
+        ]
+        Resource = "*"
+      },
+      {
+        Effect   = "Allow"
+        Action   = ["ec2:CreateTags"]
+        Resource = "arn:aws:ec2:*::snapshot/*"
+      }
+    ]
+  })
+}
+
+# DLM Lifecycle Policy - Daily and Weekly snapshots
+resource "aws_dlm_lifecycle_policy" "data_volume" {
+  count              = var.backup_enabled ? 1 : 0
+  description        = "Backup policy for ${var.project} mail data volume"
+  execution_role_arn = aws_iam_role.dlm[0].arn
+  state              = "ENABLED"
+
+  policy_details {
+    resource_types = ["VOLUME"]
+
+    target_tags = {
+      Name = "${var.project}-mail-server-data"
+    }
+
+    # Daily snapshots
+    schedule {
+      name = "Daily"
+
+      create_rule {
+        interval      = 24
+        interval_unit = "HOURS"
+        times         = [var.backup_time]
+      }
+
+      retain_rule {
+        count = var.backup_daily_retain
+      }
+
+      tags_to_add = {
+        SnapshotType = "Daily"
+        Project      = var.project
+      }
+
+      copy_tags = true
+    }
+
+    # Weekly snapshots (Sunday)
+    schedule {
+      name = "Weekly"
+
+      create_rule {
+        # Parse HH:MM into cron format: cron(minute hour ? * SUN *)
+        cron_expression = "cron(${tonumber(element(split(":", var.backup_time), 1))} ${tonumber(element(split(":", var.backup_time), 0))} ? * SUN *)"
+      }
+
+      retain_rule {
+        count = var.backup_weekly_retain
+      }
+
+      tags_to_add = {
+        SnapshotType = "Weekly"
+        Project      = var.project
+      }
+
+      copy_tags = true
+    }
+  }
+
+  tags = {
+    Name = "${var.project}-data-backup"
+  }
+}
