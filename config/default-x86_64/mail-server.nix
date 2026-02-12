@@ -82,6 +82,16 @@
     # Set PTR record with: aws ec2 modify-address-attribute --allocation-id <id> --domain-name <hostname>
     # eipAllocationId = "eipalloc-0123456789abcdef0";
 
+    # AMI override (optional - pin to prevent instance recreation when upstream AMI changes)
+    # Leave blank for initial deploy, then fill in with your instance's AMI ID afterward.
+    # Get your AMI ID with: aws ec2 describe-instances --query 'Reservations[].Instances[].ImageId'
+    # amiId = "ami-0123456789abcdef0";
+
+    # Availability zone (optional - pin to prevent data volume recreation on instance changes)
+    # Leave blank for initial deploy, then fill in with your instance's AZ afterward.
+    # Get your AZ with: aws ec2 describe-instances --query 'Reservations[].Instances[].Placement.AvailabilityZone'
+    # availabilityZone = "us-east-1a";
+
     # Automated EBS snapshots via AWS Data Lifecycle Manager
     # Cost: ~$0.15-0.25/month for a small mail server
     backup = {

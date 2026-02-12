@@ -116,6 +116,13 @@ variable "ami" {
   default     = ""
 }
 
+# Availability zone override
+variable "availability_zone" {
+  description = "EC2 availability zone (empty = let AWS choose)"
+  type        = string
+  default     = ""
+}
+
 # Elastic IP
 variable "eip_allocation_id" {
   description = "Existing Elastic IP allocation ID (empty = use auto-assigned IP)"

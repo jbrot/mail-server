@@ -140,6 +140,7 @@ resource "aws_security_group" "mail_server" {
 resource "aws_instance" "mail_server" {
   ami                    = var.ami != "" ? var.ami : data.aws_ami.nixos.id
   instance_type          = var.instance_type
+  availability_zone      = var.availability_zone != "" ? var.availability_zone : null
   key_name               = aws_key_pair.mail_server.key_name
   vpc_security_group_ids = [aws_security_group.mail_server.id]
   iam_instance_profile   = aws_iam_instance_profile.mail_server.name
@@ -158,7 +159,7 @@ resource "aws_instance" "mail_server" {
 
 # EBS volume for mail data (same AZ as instance)
 resource "aws_ebs_volume" "data" {
-  availability_zone = aws_instance.mail_server.availability_zone
+  availability_zone = var.availability_zone != "" ? var.availability_zone : aws_instance.mail_server.availability_zone
   size              = var.data_volume_size
   type              = "gp3"
   encrypted         = true

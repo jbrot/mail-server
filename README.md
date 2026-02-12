@@ -166,6 +166,11 @@ Required DNS records (created automatically):
     # Elastic IP for static IP / rDNS (optional)
     eipAllocationId = "";  # e.g., "eipalloc-0123456789abcdef0"
 
+    # Pin AMI and AZ after initial deploy to prevent instance/volume recreation
+    # Get values with: aws ec2 describe-instances
+    amiId = "";              # e.g., "ami-0123456789abcdef0"
+    availabilityZone = "";   # e.g., "us-west-2a"
+
     backup = {
       enable = true;
       time = "03:00";      # UTC

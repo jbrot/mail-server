@@ -21,15 +21,14 @@
     "mail-server-config": {
       "flake": false,
       "locked": {
-        "lastModified": 1,
-        "narHash": "sha256-7v3i1MzoqLX5iF7sFZfONxhlkhr9TaqfBwpU7vxnVNA=",
         "path": "./config/default-x86_64",
         "type": "path"
       },
       "original": {
         "path": "./config/default-x86_64",
         "type": "path"
-      }
+      },
+      "parent": []
     },
     "nixpkgs": {
       "locked": {

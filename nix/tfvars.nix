@@ -47,6 +47,9 @@ let
     # AMI override (optional - empty = auto-select latest NixOS AMI)
     ami = "${mailServerConfig.aws.amiId or ""}"
 
+    # Availability zone override (optional - empty = let AWS choose)
+    availability_zone = "${mailServerConfig.aws.availabilityZone or ""}"
+
     # Elastic IP (optional - for static IP / rDNS)
     eip_allocation_id = "${mailServerConfig.aws.eipAllocationId or ""}"
   '';
