@@ -138,7 +138,7 @@ resource "aws_security_group" "mail_server" {
 
 # EC2 Instance
 resource "aws_instance" "mail_server" {
-  ami                    = data.aws_ami.nixos.id
+  ami                    = var.ami != "" ? var.ami : data.aws_ami.nixos.id
   instance_type          = var.instance_type
   key_name               = aws_key_pair.mail_server.key_name
   vpc_security_group_ids = [aws_security_group.mail_server.id]

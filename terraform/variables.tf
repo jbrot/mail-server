@@ -109,6 +109,13 @@ variable "backup_time" {
   default     = "03:00"
 }
 
+# AMI override
+variable "ami" {
+  description = "EC2 AMI ID (empty = auto-select latest NixOS AMI)"
+  type        = string
+  default     = ""
+}
+
 # Elastic IP
 variable "eip_allocation_id" {
   description = "Existing Elastic IP allocation ID (empty = use auto-assigned IP)"
