@@ -1018,7 +1018,7 @@ verify_dns_record() {
 }
 
 test_mail_dns() {
-    log_info "=== Mail DNS record verification (SPF/DMARC/SRV) ==="
+    log_info "=== Mail DNS record verification (SPF/DMARC/SRV/Autoconfig) ==="
 
     local failed=0
 
@@ -1057,6 +1057,27 @@ test_mail_dns() {
         verify_dns_record "Submission SRV" "SRV" "_submission._tcp.${DOMAIN}" "0 1 587 ${HOSTNAME}." || failed=1
     else
         log_info "SRV records disabled, skipping verification"
+    fi
+
+    # Verify autoconfig (Mozilla Autoconfig email auto-discovery)
+    local autoconfig_enabled
+    autoconfig_enabled=$(read_nix_config_bool "autoconfig.enable")
+
+    if [ "$autoconfig_enabled" = "true" ]; then
+        verify_dns_record "Autoconfig CNAME" "CNAME" "autoconfig.${DOMAIN}" "${HOSTNAME}." || failed=1
+
+        # Verify autoconfig XML is served over HTTPS
+        log_info "Verifying autoconfig XML endpoint..."
+        local autoconfig_xml
+        autoconfig_xml=$(curl -sf "https://autoconfig.${DOMAIN}/mail/config-v1.1.xml" 2>/dev/null || echo "")
+        if echo "$autoconfig_xml" | grep -q "<domain>${DOMAIN}</domain>"; then
+            log_info "Autoconfig XML served correctly"
+        else
+            log_error "Autoconfig XML not served or missing domain"
+            failed=1
+        fi
+    else
+        log_info "Autoconfig disabled, skipping verification"
     fi
 
     if [[ $failed -eq 0 ]]; then

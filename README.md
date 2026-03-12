@@ -16,7 +16,7 @@ Maybe I'll make a version 3 in another 5 years, haha.
 - **Full mail stack**: OpenSMTPd (SMTP), Dovecot (IMAP), Rspamd (spam filtering), Redis (Rspamd backend)
 - **Containerized services**: Each service runs in an isolated Podman container with restricted network access
 - **Reproducible builds**: All container images built with Nix, pinned dependencies via flake.lock
-- **Automated DNS**: SPF, DMARC, DKIM, and SRV records managed via Terraform/Route53
+- **Automated DNS**: SPF, DMARC, DKIM, SRV, and autoconfig records managed via Terraform/Route53
 - **TLS certificates**: Automatic Let's Encrypt certificates via ACME
 - **Monitoring**: Monit alerts for disk space, memory, container health, and OOM detection
 - **Automated backups**: Daily and weekly EBS snapshots via AWS Data Lifecycle Manager
@@ -97,6 +97,7 @@ Required DNS records (created automatically):
 - `A` record for mail server hostname
 - `MX` record for domain (when `aws.route53.createMX = true`)
 - `SRV` records for auto-discovery (when `aws.route53.createSRV = true`)
+- `CNAME` record for `autoconfig.{domain}` (when `autoconfig.enable = true`)
 - `TXT` record for SPF
 - `TXT` record for DMARC (`_dmarc.domain`)
 - `TXT` record for DKIM (`selector._domainkey.domain`)
@@ -136,6 +137,9 @@ Required DNS records (created automatically):
     policy = "reject";         # none, quarantine, reject
     rua = "mailto:dmarc@example.com";  # Aggregate reports
   };
+
+  # Mozilla Autoconfig for email client auto-discovery (GNOME, Thunderbird)
+  autoconfig.enable = false;
 
   # Let's Encrypt
   acme = {

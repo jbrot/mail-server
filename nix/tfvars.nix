@@ -34,6 +34,7 @@ let
     route53_zone_id    = "${mailServerConfig.aws.route53.zoneId or ""}"
     route53_create_mx  = ${if (mailServerConfig.aws.route53.createMX or false) then "true" else "false"}
     route53_create_srv = ${if (mailServerConfig.aws.route53.createSRV or false) then "true" else "false"}
+    route53_create_autoconfig = ${if (mailServerConfig.autoconfig.enable or false) then "true" else "false"}
 
     # SPF/DMARC settings (validated via checkdmarc, empty = disabled)
     spf_record   = "${spfRecord}"

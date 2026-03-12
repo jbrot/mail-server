@@ -3,6 +3,36 @@
 
 { config, lib, pkgs, self, mailServerConfig, ... }:
 
+let
+  autoconfigEnabled = mailServerConfig.autoconfig.enable or false;
+
+  # Mozilla Autoconfig XML for email client auto-discovery
+  autoconfigDir = pkgs.runCommand "autoconfig-dir" {} ''
+    mkdir -p $out/mail
+    cat > $out/mail/config-v1.1.xml << 'XML'
+<?xml version="1.0" encoding="UTF-8"?>
+<clientConfig version="1.1">
+  <emailProvider id="${mailServerConfig.domain}">
+    <domain>${mailServerConfig.domain}</domain>
+    <incomingServer type="imap">
+      <hostname>${mailServerConfig.hostname}</hostname>
+      <port>993</port>
+      <socketType>SSL</socketType>
+      <authentication>password-cleartext</authentication>
+      <username>%EMAILLOCALPART%</username>
+    </incomingServer>
+    <outgoingServer type="smtp">
+      <hostname>${mailServerConfig.hostname}</hostname>
+      <port>587</port>
+      <socketType>STARTTLS</socketType>
+      <authentication>password-cleartext</authentication>
+      <username>%EMAILLOCALPART%</username>
+    </outgoingServer>
+  </emailProvider>
+</clientConfig>
+XML
+  '';
+in
 {
   # System basics
   system.stateVersion = "24.05";
@@ -140,15 +170,23 @@
     };
   };
 
-  # Nginx for ACME HTTP-01 challenges
+  # Nginx for ACME HTTP-01 challenges and autoconfig
   services.nginx = {
     enable = true;
-    virtualHosts.${mailServerConfig.hostname} = {
-      locations."/.well-known/acme-challenge" = {
-        root = "/var/lib/acme/acme-challenge";
+    virtualHosts = {
+      ${mailServerConfig.hostname} = {
+        locations."/.well-known/acme-challenge" = {
+          root = "/var/lib/acme/acme-challenge";
+        };
+        locations."/" = {
+          return = "301 https://$host$request_uri";
+        };
       };
-      locations."/" = {
-        return = "301 https://$host$request_uri";
+    } // lib.optionalAttrs autoconfigEnabled {
+      "autoconfig.${mailServerConfig.domain}" = {
+        forceSSL = true;
+        enableACME = true;
+        root = autoconfigDir;
       };
     };
   };

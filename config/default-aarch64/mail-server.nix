@@ -39,6 +39,9 @@
     policy = "quarantine";
   };
 
+  # Mozilla Autoconfig for email client auto-discovery
+  autoconfig.enable = false;
+
   # ACME (Let's Encrypt) certificate settings
   acme = {
     email = "admin@example.com";  # Contact email for certificate notifications

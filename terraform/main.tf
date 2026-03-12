@@ -123,6 +123,17 @@ resource "aws_security_group" "mail_server" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 
+  dynamic "ingress" {
+    for_each = var.route53_create_autoconfig ? [1] : []
+    content {
+      description = "HTTPS for autoconfig"
+      from_port   = 443
+      to_port     = 443
+      protocol    = "tcp"
+      cidr_blocks = ["0.0.0.0/0"]
+    }
+  }
+
   # All outbound traffic
   egress {
     from_port   = 0
@@ -267,6 +278,16 @@ resource "aws_route53_record" "srv_submission" {
   type    = "SRV"
   ttl     = 3600
   records = ["0 1 587 ${var.hostname}."]
+}
+
+# Autoconfig CNAME for Mozilla Autoconfig email auto-discovery
+resource "aws_route53_record" "autoconfig" {
+  count   = var.route53_create_autoconfig ? 1 : 0
+  zone_id = local.zone_id
+  name    = "autoconfig.${var.domain}"
+  type    = "CNAME"
+  ttl     = 3600
+  records = ["${var.hostname}."]
 }
 
 # IAM role for EC2 instance (DKIM Route53 management)

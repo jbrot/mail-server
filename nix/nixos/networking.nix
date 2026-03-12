@@ -49,8 +49,8 @@
         # SSH
         tcp dport 22 accept
 
-        # HTTP (ACME challenges)
-        tcp dport 80 accept
+        # HTTP/HTTPS (ACME challenges, autoconfig)
+        tcp dport { 80, 443 } accept
 
         # Everything else dropped by policy
       }

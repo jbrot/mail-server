@@ -78,6 +78,12 @@ variable "route53_create_srv" {
   default     = false
 }
 
+variable "route53_create_autoconfig" {
+  description = "Whether to create autoconfig CNAME for Mozilla Autoconfig email auto-discovery"
+  type        = bool
+  default     = false
+}
+
 variable "spf_record" {
   description = "SPF record value (empty string = disabled)"
   type        = string
