@@ -975,92 +975,88 @@ IMAP_EOF
     return $failed
 }
 
+# Query a DNS record and compare against an expected value.
+# Retries up to 18 times (3 minutes) for propagation.
+# Usage: verify_dns_record <label> <type> <name> <expected> [<grep_filter>]
+#   grep_filter is optional, applied to dig output before comparison (e.g., "v=spf1")
+verify_dns_record() {
+    local label="$1"
+    local record_type="$2"
+    local dns_name="$3"
+    local expected="$4"
+    local filter="${5:-}"
+    local max_attempts=18
+    local actual=""
+
+    log_info "Verifying $label record..."
+    for ((i=1; i<=max_attempts; i++)); do
+        actual=$(run_dig +short "$record_type" "$dns_name" @8.8.8.8 2>/dev/null || echo "")
+        if [[ "$record_type" == "TXT" ]]; then
+            actual=$(echo "$actual" | tr -d '"')
+        fi
+        if [[ -n "$filter" ]]; then
+            actual=$(echo "$actual" | grep "$filter" || echo "")
+        fi
+        if [[ -n "$actual" ]]; then
+            break
+        fi
+        echo -ne "\r${BLUE}[WAIT]${NC} $label record not found yet (attempt $i/$max_attempts)...    "
+        sleep 10
+    done
+    echo ""
+
+    log_info "Expected $label: $expected"
+    log_info "Actual $label:   $actual"
+
+    if [ "$actual" = "$expected" ]; then
+        log_info "$label record matches"
+        return 0
+    else
+        log_error "$label record mismatch!"
+        return 1
+    fi
+}
+
 test_mail_dns() {
-    log_info "=== Mail DNS record verification (SPF/DMARC) ==="
+    log_info "=== Mail DNS record verification (SPF/DMARC/SRV) ==="
 
     local failed=0
 
-    # Check if SPF is enabled
+    # Verify SPF record
     local spf_enabled
     spf_enabled=$(nix eval $NIX_VERBOSE .#lib.mailDns.spfEnabled $OVERRIDE_ARG 2>/dev/null || echo "false")
 
-    # Check if DMARC is enabled
-    local dmarc_enabled
-    dmarc_enabled=$(nix eval $NIX_VERBOSE .#lib.mailDns.dmarcEnabled $OVERRIDE_ARG 2>/dev/null || echo "false")
-
-    # Verify SPF record
     if [ "$spf_enabled" = "true" ]; then
-        log_info "Verifying SPF record..."
-
-        # Build and read the expected SPF record
-        local spf_drv
+        local spf_drv expected_spf
         spf_drv=$(nix build --no-link --print-out-paths $NIX_VERBOSE .#lib.mailDns.spfRecord $OVERRIDE_ARG 2>/dev/null)
-        local expected_spf
         expected_spf=$(cat "$spf_drv")
-
-        # Query actual SPF from DNS (with retries for propagation)
-        local actual_spf=""
-        local spf_attempts=18
-        for ((i=1; i<=spf_attempts; i++)); do
-            # SPF records are TXT records at the domain root
-            # dig returns quoted strings, tr -d removes the quotes
-            actual_spf=$(run_dig +short TXT "$DOMAIN" @8.8.8.8 2>/dev/null | grep "v=spf1" | tr -d '"' || echo "")
-            if [[ -n "$actual_spf" ]]; then
-                break
-            fi
-            echo -ne "\r${BLUE}[WAIT]${NC} SPF TXT record not found yet (attempt $i/$spf_attempts)...    "
-            sleep 10
-        done
-        echo ""
-
-        log_info "Expected SPF: $expected_spf"
-        log_info "Actual SPF:   $actual_spf"
-
-        if [ "$actual_spf" = "$expected_spf" ]; then
-            log_info "SPF record matches"
-        else
-            log_error "SPF record mismatch!"
-            failed=1
-        fi
+        verify_dns_record "SPF" "TXT" "$DOMAIN" "$expected_spf" "v=spf1" || failed=1
     else
         log_info "SPF disabled, skipping verification"
     fi
 
     # Verify DMARC record
+    local dmarc_enabled
+    dmarc_enabled=$(nix eval $NIX_VERBOSE .#lib.mailDns.dmarcEnabled $OVERRIDE_ARG 2>/dev/null || echo "false")
+
     if [ "$dmarc_enabled" = "true" ]; then
-        log_info "Verifying DMARC record..."
-
-        # Build and read the expected DMARC record
-        local dmarc_drv
+        local dmarc_drv expected_dmarc
         dmarc_drv=$(nix build --no-link --print-out-paths $NIX_VERBOSE .#lib.mailDns.dmarcRecord $OVERRIDE_ARG 2>/dev/null)
-        local expected_dmarc
         expected_dmarc=$(cat "$dmarc_drv")
-
-        # Query actual DMARC from DNS (with retries for propagation)
-        local actual_dmarc=""
-        local dmarc_attempts=18
-        for ((i=1; i<=dmarc_attempts; i++)); do
-            # DMARC records are TXT records at _dmarc.<domain>
-            actual_dmarc=$(run_dig +short TXT "_dmarc.$DOMAIN" @8.8.8.8 2>/dev/null | tr -d '"' || echo "")
-            if [[ -n "$actual_dmarc" ]]; then
-                break
-            fi
-            echo -ne "\r${BLUE}[WAIT]${NC} DMARC TXT record not found yet (attempt $i/$dmarc_attempts)...    "
-            sleep 10
-        done
-        echo ""
-
-        log_info "Expected DMARC: $expected_dmarc"
-        log_info "Actual DMARC:   $actual_dmarc"
-
-        if [ "$actual_dmarc" = "$expected_dmarc" ]; then
-            log_info "DMARC record matches"
-        else
-            log_error "DMARC record mismatch!"
-            failed=1
-        fi
+        verify_dns_record "DMARC" "TXT" "_dmarc.$DOMAIN" "$expected_dmarc" || failed=1
     else
         log_info "DMARC disabled, skipping verification"
+    fi
+
+    # Verify SRV records (RFC 6186 email auto-discovery)
+    local srv_enabled
+    srv_enabled=$(read_nix_config_bool "aws.route53.createSRV")
+
+    if [ "$srv_enabled" = "true" ]; then
+        verify_dns_record "IMAPS SRV" "SRV" "_imaps._tcp.${DOMAIN}" "0 1 993 ${HOSTNAME}." || failed=1
+        verify_dns_record "Submission SRV" "SRV" "_submission._tcp.${DOMAIN}" "0 1 587 ${HOSTNAME}." || failed=1
+    else
+        log_info "SRV records disabled, skipping verification"
     fi
 
     if [[ $failed -eq 0 ]]; then

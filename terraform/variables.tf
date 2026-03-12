@@ -72,6 +72,12 @@ variable "route53_create_mx" {
   default     = false
 }
 
+variable "route53_create_srv" {
+  description = "Whether to create SRV records for email auto-discovery (RFC 6186)"
+  type        = bool
+  default     = false
+}
+
 variable "spf_record" {
   description = "SPF record value (empty string = disabled)"
   type        = string

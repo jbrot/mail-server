@@ -250,6 +250,25 @@ resource "aws_route53_record" "dmarc" {
   records = [var.dmarc_record]
 }
 
+# SRV records for email auto-discovery (RFC 6186)
+resource "aws_route53_record" "srv_imaps" {
+  count   = var.route53_create_srv ? 1 : 0
+  zone_id = local.zone_id
+  name    = "_imaps._tcp.${var.domain}"
+  type    = "SRV"
+  ttl     = 3600
+  records = ["0 1 993 ${var.hostname}."]
+}
+
+resource "aws_route53_record" "srv_submission" {
+  count   = var.route53_create_srv ? 1 : 0
+  zone_id = local.zone_id
+  name    = "_submission._tcp.${var.domain}"
+  type    = "SRV"
+  ttl     = 3600
+  records = ["0 1 587 ${var.hostname}."]
+}
+
 # IAM role for EC2 instance (DKIM Route53 management)
 resource "aws_iam_role" "mail_server" {
   name = "${var.project}-mail-server"

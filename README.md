@@ -16,7 +16,7 @@ Maybe I'll make a version 3 in another 5 years, haha.
 - **Full mail stack**: OpenSMTPd (SMTP), Dovecot (IMAP), Rspamd (spam filtering), Redis (Rspamd backend)
 - **Containerized services**: Each service runs in an isolated Podman container with restricted network access
 - **Reproducible builds**: All container images built with Nix, pinned dependencies via flake.lock
-- **Automated DNS**: SPF, DMARC, and DKIM records managed via Terraform/Route53
+- **Automated DNS**: SPF, DMARC, DKIM, and SRV records managed via Terraform/Route53
 - **TLS certificates**: Automatic Let's Encrypt certificates via ACME
 - **Monitoring**: Monit alerts for disk space, memory, container health, and OOM detection
 - **Automated backups**: Daily and weekly EBS snapshots via AWS Data Lifecycle Manager
@@ -96,6 +96,7 @@ If using an existing Route53 zone, DNS records are created automatically. Otherw
 Required DNS records (created automatically):
 - `A` record for mail server hostname
 - `MX` record for domain (when `aws.route53.createMX = true`)
+- `SRV` records for auto-discovery (when `aws.route53.createSRV = true`)
 - `TXT` record for SPF
 - `TXT` record for DMARC (`_dmarc.domain`)
 - `TXT` record for DKIM (`selector._domainkey.domain`)
@@ -161,6 +162,7 @@ Required DNS records (created automatically):
     route53 = {
       zoneId = "";       # Existing zone ID, or "" to create new
       createMX = false;  # Set true when ready to receive mail
+      createSRV = false; # SRV records for email auto-discovery (RFC 6186)
     };
 
     # Elastic IP for static IP / rDNS (optional)

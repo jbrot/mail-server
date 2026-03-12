@@ -75,6 +75,8 @@
       zoneId = "";
       # Whether to create MX record (set false during migration, true when ready to go live)
       createMX = false;
+      # SRV records for email auto-discovery (RFC 6186)
+      createSRV = false;
     };
 
     # Elastic IP allocation ID for static IP / reverse DNS (optional)
