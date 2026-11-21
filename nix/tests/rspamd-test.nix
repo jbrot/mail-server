@@ -124,7 +124,7 @@ pkgs.testers.runNixOSTest {
 
     # VM resources
     virtualisation = {
-      memorySize = 1024;
+      memorySize = 2048;
       cores = 2;
       diskSize = 4096;  # Larger disk for container images
       podman.enable = true;

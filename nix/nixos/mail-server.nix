@@ -137,7 +137,7 @@ in
 
       rspamd.memory = lib.mkOption {
         type = lib.types.int;
-        default = 384;
+        default = 768;
         description = "Rspamd container memory limit in MB";
       };
 

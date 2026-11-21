@@ -72,9 +72,11 @@ pkgs.dockerTools.buildLayeredImage {
     mkdir -p tmp
 
     # Create modules directory with both dovecot and pigeonhole modules
+    # Dovecot 2.4 uses subdirectories (settings/, sieve/, doveadm/, auth/)
     mkdir -p etc/dovecot/modules
-    find ${dovecot}/lib/dovecot -name '*.so' -exec ln -sf {} etc/dovecot/modules/ \;
-    find ${pigeonhole}/lib/dovecot -name '*.so' -exec ln -sf {} etc/dovecot/modules/ \;
+    cp -rs ${dovecot}/lib/dovecot/modules/* etc/dovecot/modules/
+    chmod -R u+w etc/dovecot/modules
+    cp -rsf ${pigeonhole}/lib/dovecot/modules/* etc/dovecot/modules/
 
     # Copy passwd and group files
     cp ${passwdFile} etc/passwd
@@ -84,6 +86,11 @@ pkgs.dockerTools.buildLayeredImage {
     echo "passwd: files" > etc/nsswitch.conf
     echo "group: files" >> etc/nsswitch.conf
     echo "hosts: files dns" >> etc/nsswitch.conf
+
+    # Dovecot 2.4 loads settings modules from a hardcoded path
+    # (CONFIG_MODULE_DIR patched to /run/current-system/sw/lib/dovecot/modules/settings)
+    mkdir -p run/current-system/sw/lib/dovecot/modules
+    ln -s /etc/dovecot/modules/settings run/current-system/sw/lib/dovecot/modules/settings
 
     # Create symlinks for rspamc in standard PATH locations
     mkdir -p usr/bin

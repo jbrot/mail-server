@@ -260,7 +260,7 @@ in
         (lib.mapAttrsToList (_: entry: entry.source)
           (lib.filterAttrs (name: _: lib.hasPrefix "smtpd/" name) config.environment.etc));
       serviceConfig = {
-        Restart = "always";
+        Restart = lib.mkForce "always";
         RestartSec = "10s";
 
         # Systemd hardening

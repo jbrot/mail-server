@@ -63,8 +63,9 @@ pkgs.testers.runNixOSTest {
         memoryThreshold = 1;  # Very low - any usage triggers alert
       };
 
-      # Enable OOM kill detection
+      # Enable OOM kill detection with wider lookback for test reliability
       oom.enable = true;
+      oom.lookbackSeconds = 10;
     };
 
     # Create mount point and mount tiny tmpfs for testing
@@ -356,7 +357,7 @@ pkgs.testers.runNixOSTest {
         print("PASS: OOM check shows OK in Monit when no OOM kills")
 
     # Test 13: OOM kill detection triggers Monit alert (transient)
-    # The OOM check looks back (checkInterval * 2) = 2 seconds, so alert is transient
+    # The OOM check looks back 10 seconds (oom.lookbackSeconds), so alert is transient
     with subtest("OOM check triggers transient Monit alert when OOM kill occurs"):
         # Run a container with very limited memory that will OOM
         print("Starting memory-limited container that will OOM...")
@@ -370,17 +371,17 @@ pkgs.testers.runNixOSTest {
         print(f"OOM container output: {output}")
 
         # Check kernel log for OOM message immediately - this MUST exist
-        oom_log = machine.succeed("journalctl -k --since '10 seconds ago' 2>/dev/null | grep -iE 'oom|killed process|out of memory' || true")
+        oom_log = machine.succeed("journalctl -k --since '30 seconds ago' 2>/dev/null | grep -iE 'oom|killed process|out of memory' || true")
         print(f"Kernel OOM log: {oom_log}")
         assert oom_log.strip(), "OOM kill did not occur - test requires OOM to trigger"
 
-        # Immediately verify the script detects the OOM (within 2 second window)
+        # Verify the script detects the OOM (within 10 second window)
         exit_code, output = machine.execute(oom_script)
-        print(f"OOM script immediately after kill: {output}, exit code: {exit_code}")
+        print(f"OOM script after kill: {output}, exit code: {exit_code}")
         assert exit_code == 1, f"Expected exit 1 (OOM detected), got {exit_code}"
 
         # Wait for Monit check cycle to pick up the alert
-        time.sleep(2)
+        time.sleep(3)
 
         # Verify Monit shows failed status
         status = machine.succeed("monit status oom-killer")
@@ -388,10 +389,9 @@ pkgs.testers.runNixOSTest {
         assert re.search(r"status\s+Status failed", status), f"Expected 'Status failed' in Monit after OOM, got: {status}"
         print("PASS: OOM kill detected and Monit alert triggered")
 
-        # Now wait for the OOM to fall outside the 2-second detection window
-        # With checkInterval=1, the script looks back 2 seconds, so wait 3 seconds
+        # Now wait for the OOM to fall outside the 10-second detection window
         print("Waiting for OOM to fall outside detection window...")
-        time.sleep(3)
+        time.sleep(11)
 
         # Verify the script no longer detects the OOM
         exit_code, output = machine.execute(oom_script)
@@ -399,7 +399,7 @@ pkgs.testers.runNixOSTest {
         assert exit_code == 0, f"Expected exit 0 (OOM outside window), got {exit_code}"
 
         # Wait for Monit check cycle to see the recovery
-        time.sleep(2)
+        time.sleep(3)
 
         # Verify Monit shows OK status again
         status = machine.succeed("monit status oom-killer")

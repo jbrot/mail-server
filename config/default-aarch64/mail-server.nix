@@ -114,7 +114,7 @@
   resources = {
     opensmtpd.memory = 192;
     dovecot.memory = 192;
-    rspamd.memory = 384;
+    rspamd.memory = 768;
     redis.memory = 192;
   };
 }

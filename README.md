@@ -189,7 +189,7 @@ Required DNS records (created automatically):
   resources = {
     opensmtpd.memory = 192;
     dovecot.memory = 192;
-    rspamd.memory = 384;
+    rspamd.memory = 768;
     redis.memory = 192;
   };
 }
@@ -235,10 +235,15 @@ nix build .#checks.x86_64-linux.mail-server-integration --print-build-logs
 
 Available tests:
 - `mail-server-integration` - Full stack integration test
-- `opensmtpd-test` - OpenSMTPd standalone
-- `dovecot-test` - Dovecot standalone
-- `rspamd-test` - Rspamd spam filtering
-- `monit-test` - Monitoring alerts
+- `mail-delivery` - OpenSMTPd + Dovecot delivery pipeline
+- `opensmtpd-standalone` - OpenSMTPd standalone
+- `opensmtpd-rspamd` - OpenSMTPd + Rspamd spam filtering and DKIM
+- `dovecot-standalone` - Dovecot standalone
+- `dovecot-rspamd` - Dovecot + Rspamd spam/ham learning via sieve
+- `rspamd-standalone` - Rspamd spam filtering
+- `monit-alerts` - Monitoring alerts
+- `format-data-volume` - Data volume formatting
+- `nixos-config` - NixOS configuration validation
 
 ## Operations
 

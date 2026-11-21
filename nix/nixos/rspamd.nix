@@ -219,7 +219,7 @@ in
     resources = {
       memory = lib.mkOption {
         type = lib.types.int;
-        default = 384;
+        default = 768;
         description = "Rspamd container memory limit in MB";
       };
 
@@ -448,7 +448,7 @@ in
       after = [ "network-online.target" ];
       restartTriggers = [ cfg.redis.image ];
       serviceConfig = {
-        Restart = "always";
+        Restart = lib.mkForce "always";
         RestartSec = "10s";
 
         # Systemd hardening
@@ -475,7 +475,7 @@ in
         (lib.mapAttrsToList (_: entry: entry.source)
           (lib.filterAttrs (name: _: lib.hasPrefix "rspamd/" name) config.environment.etc));
       serviceConfig = {
-        Restart = "always";
+        Restart = lib.mkForce "always";
         RestartSec = "10s";
 
         # Systemd hardening

@@ -105,8 +105,8 @@ pkgs.testers.runNixOSTest {
     import time
 
     def get_learned_count():
-        """Get total learned message count from rspamd using JSON API"""
-        result = mail.succeed("rspamc -h localhost:11334 -j stat")
+        """Get total learned message count from rspamd using HTTP API"""
+        result = mail.succeed("curl -s http://localhost:11334/stat")
         stats = json.loads(result)
         learned = stats.get("learned", 0)
         print(f"Rspamd stats: learned={learned}")
@@ -162,7 +162,7 @@ pkgs.testers.runNixOSTest {
         result = mail.succeed("cat /etc/dovecot/dovecot.conf")
         assert "imap_sieve" in result, "imap_sieve plugin not in config"
         assert "sieve_imapsieve" in result, "sieve_imapsieve not in config"
-        assert "imapsieve_mailbox1_name = Junk" in result, "Junk mailbox sieve rule not found"
+        assert "mailbox Junk" in result, "Junk mailbox sieve rule not found"
 
     # Get initial bayes stats
     with subtest("Get initial bayes stats"):

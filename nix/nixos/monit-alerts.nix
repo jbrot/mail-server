@@ -98,8 +98,9 @@ let
   );
 
   # OOM kill check (looks back 2x check interval to avoid missing events)
+  oomLookback = if cfg.oom.lookbackSeconds != null then cfg.oom.lookbackSeconds else cfg.checkInterval * 2;
   oomCheck = lib.optionalString cfg.oom.enable ''
-    check program oom-killer with path "${oomCheckScript} '${toString (cfg.checkInterval * 2)} seconds ago'"
+    check program oom-killer with path "${oomCheckScript} '${toString oomLookback} seconds ago'"
       if status != 0 then alert
   '';
 
@@ -274,6 +275,12 @@ in
         type = lib.types.bool;
         default = true;
         description = "Alert when OOM killer terminates a process";
+      };
+
+      lookbackSeconds = lib.mkOption {
+        type = lib.types.nullOr lib.types.int;
+        default = null;
+        description = "Seconds to look back for OOM kills. Defaults to checkInterval * 2.";
       };
     };
 

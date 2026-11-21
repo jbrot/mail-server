@@ -2,7 +2,7 @@
 { pkgs, mailServerConfig, mailDns }:
 
 let
-  # Get NixOS version from nixpkgs (e.g., "25.11")
+  # Get NixOS version from nixpkgs (e.g., "26.05")
   nixosVersion = pkgs.lib.trivial.release;
 
   # Read validated strings from derivations only if enabled

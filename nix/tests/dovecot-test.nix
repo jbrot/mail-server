@@ -198,22 +198,23 @@ pkgs.testers.runNixOSTest {
     with subtest("LMTP delivery to Alice works"):
         mail.succeed("""
             (
-                echo "LHLO localhost"
+                printf 'LHLO localhost\r\n'
                 sleep 0.5
-                echo "MAIL FROM:<sender@external.com>"
+                printf 'MAIL FROM:<sender@external.com>\r\n'
                 sleep 0.5
-                echo "RCPT TO:<alice>"
+                printf 'RCPT TO:<alice>\r\n'
                 sleep 0.5
-                echo "DATA"
+                printf 'DATA\r\n'
                 sleep 0.5
-                echo "From: sender@external.com"
-                echo "To: alice@test.local"
-                echo "Subject: LMTP Message for Alice"
-                echo ""
-                echo "This LMTP message is for Alice only."
-                echo "."
+                printf 'From: sender@external.com\r\n'
+                printf 'To: alice@test.local\r\n'
+                printf 'Subject: LMTP Message for Alice\r\n'
+                printf '\r\n'
+                printf 'This LMTP message is for Alice only.\r\n'
+                printf '.\r\n'
                 sleep 0.5
-                echo "QUIT"
+                printf 'QUIT\r\n'
+                sleep 1
             ) | ${pkgs.netcat}/bin/nc localhost 24
         """)
         time.sleep(2)
@@ -225,22 +226,23 @@ pkgs.testers.runNixOSTest {
     with subtest("LMTP delivery to Bob works"):
         mail.succeed("""
             (
-                echo "LHLO localhost"
+                printf 'LHLO localhost\r\n'
                 sleep 0.5
-                echo "MAIL FROM:<sender@external.com>"
+                printf 'MAIL FROM:<sender@external.com>\r\n'
                 sleep 0.5
-                echo "RCPT TO:<bob>"
+                printf 'RCPT TO:<bob>\r\n'
                 sleep 0.5
-                echo "DATA"
+                printf 'DATA\r\n'
                 sleep 0.5
-                echo "From: sender@external.com"
-                echo "To: bob@test.local"
-                echo "Subject: LMTP Message for Bob"
-                echo ""
-                echo "This LMTP message is for Bob only."
-                echo "."
+                printf 'From: sender@external.com\r\n'
+                printf 'To: bob@test.local\r\n'
+                printf 'Subject: LMTP Message for Bob\r\n'
+                printf '\r\n'
+                printf 'This LMTP message is for Bob only.\r\n'
+                printf '.\r\n'
                 sleep 0.5
-                echo "QUIT"
+                printf 'QUIT\r\n'
+                sleep 1
             ) | ${pkgs.netcat}/bin/nc localhost 24
         """)
         time.sleep(2)
@@ -310,24 +312,25 @@ pkgs.testers.runNixOSTest {
         # Send a message with X-Spam: Yes header via LMTP
         mail.succeed("""
             (
-                echo "LHLO localhost"
+                printf 'LHLO localhost\r\n'
                 sleep 0.5
-                echo "MAIL FROM:<spammer@example.com>"
+                printf 'MAIL FROM:<spammer@example.com>\r\n'
                 sleep 0.5
-                echo "RCPT TO:<alice>"
+                printf 'RCPT TO:<alice>\r\n'
                 sleep 0.5
-                echo "DATA"
+                printf 'DATA\r\n'
                 sleep 0.5
-                echo "From: spammer@example.com"
-                echo "To: alice@test.local"
-                echo "Subject: Spam Test Message"
-                echo "X-Spam: Yes"
-                echo "Message-ID: <spam-filter-test@example.com>"
-                echo ""
-                echo "This message has X-Spam: Yes and should go to Junk."
-                echo "."
+                printf 'From: spammer@example.com\r\n'
+                printf 'To: alice@test.local\r\n'
+                printf 'Subject: Spam Test Message\r\n'
+                printf 'X-Spam: Yes\r\n'
+                printf 'Message-ID: <spam-filter-test@example.com>\r\n'
+                printf '\r\n'
+                printf 'This message has X-Spam: Yes and should go to Junk.\r\n'
+                printf '.\r\n'
                 sleep 0.5
-                echo "QUIT"
+                printf 'QUIT\r\n'
+                sleep 1
             ) | ${pkgs.netcat}/bin/nc localhost 24
         """)
         time.sleep(2)
