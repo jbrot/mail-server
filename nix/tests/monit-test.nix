@@ -112,13 +112,13 @@ pkgs.testers.runNixOSTest {
 
     # Test 1: Monit is running and monitoring our test filesystem
     with subtest("Monit monitors test filesystem"):
-        status = machine.succeed("monit status testfs")
-        assert "testfs" in status, "testfs not found in monit status: " + status
+        status = machine.succeed("monit status disk-testfs")
+        assert "disk-testfs" in status, "disk-testfs not found in monit status: " + status
         print("PASS: Monit is monitoring testfs")
 
     # Test 2: Initially, testfs should be OK
     with subtest("Clean filesystem shows OK status"):
-        status = machine.succeed("monit status testfs")
+        status = machine.succeed("monit status disk-testfs")
         # Monit shows "status" followed by "OK" when filesystem is healthy
         assert re.search(r"status\s+OK", status), f"Expected OK status, got: {status}"
         print("PASS: testfs is initially healthy")
@@ -136,7 +136,7 @@ pkgs.testers.runNixOSTest {
         time.sleep(3)
 
         # Check status - should show alert triggered
-        status = machine.succeed("monit status testfs")
+        status = machine.succeed("monit status disk-testfs")
         print(f"Status after fill: {status}")
 
         # The status should show "Resource limit matched" when threshold exceeded
@@ -154,7 +154,7 @@ pkgs.testers.runNixOSTest {
         # Wait for check cycle
         time.sleep(3)
 
-        status = machine.succeed("monit status testfs")
+        status = machine.succeed("monit status disk-testfs")
         print(f"Status after cleanup: {status}")
 
         # Should be back to healthy (status OK)

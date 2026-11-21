@@ -181,6 +181,7 @@ pkgs.testers.runNixOSTest {
   };
 
   testScript = ''
+    import re
     import time
 
     # Start both VMs
@@ -459,11 +460,11 @@ pkgs.testers.runNixOSTest {
         print(mail_content)
         print("=" * 60)
 
-        # Monit alert emails contain "monit alert" in subject and filesystem name in body
+        # Monit alert emails use the custom mail-format: "Subject: [<host>] <check>: <event>"
         assert "monit" in mail_content.lower(), \
             f"Monit alert email not found in mailbox. Content: {mail_content[:500]}"
-        assert "testfs" in mail_content, \
-            f"Alert email doesn't mention testfs. Content: {mail_content[:500]}"
+        assert re.search(r"Subject: \[mail\] disk-testfs: Resource limit matched", mail_content), \
+            f"Alert email subject doesn't match expected format. Content: {mail_content[:500]}"
         print("SUCCESS: Monit alert email delivered through full mail stack")
 
         # Cleanup: remove the fill file

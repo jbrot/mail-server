@@ -10,9 +10,10 @@ let
   cfg = config.services.monitAlerts;
 
   # Generate filesystem check blocks from the filesystem targets attrset
+  # Checks are named "disk-<name>" so alert subjects say what kind of thing it is
   filesystemChecks = lib.concatStringsSep "\n" (
     lib.mapAttrsToList (name: path: ''
-      check filesystem ${name} with path ${path}
+      check filesystem disk-${name} with path ${path}
         if space usage > ${toString cfg.filesystems.spaceThreshold}% then alert
         if inode usage > ${toString cfg.filesystems.inodeThreshold}% then alert
     '') cfg.filesystems.targets
@@ -28,34 +29,45 @@ let
     MEM_PCT=$(${pkgs.podman}/bin/podman stats --no-stream --format "{{.MemPerc}}" "$CONTAINER" 2>/dev/null | tr -d '%')
 
     if [ -z "$MEM_PCT" ]; then
-      echo "Container $CONTAINER not found or not running"
+      echo "$CONTAINER container not found or not running"
       exit 1
     fi
 
     # Compare as integers (remove decimal part)
     MEM_INT=''${MEM_PCT%.*}
     if [ "$MEM_INT" -ge "$THRESHOLD" ]; then
-      echo "Container $CONTAINER memory usage is ''${MEM_PCT}% (threshold: ''${THRESHOLD}%)"
+      echo "$CONTAINER memory HIGH: ''${MEM_PCT}% (threshold ''${THRESHOLD}%)"
       exit 2
     fi
 
-    echo "Container $CONTAINER memory usage is ''${MEM_PCT}%"
+    echo "$CONTAINER memory OK: ''${MEM_PCT}% (threshold ''${THRESHOLD}%)"
     exit 0
   '';
 
   # Script to check for recent OOM kills in the kernel journal
   # Returns non-zero if OOM kill detected in the last check interval
+  # Prints a one-line summary (count + killed process names) for the alert email
   oomCheckScript = pkgs.writeShellScript "check-oom-kills" ''
     SINCE="$1"
+    WINDOW="''${SINCE% ago}"
 
     # Check kernel messages for OOM kills
     OOM_MSG=$(${pkgs.systemd}/bin/journalctl -k --since "$SINCE" 2>/dev/null | grep -i "out of memory\|oom-kill\|killed process")
 
     if [ -n "$OOM_MSG" ]; then
-      echo "OOM kill detected: $OOM_MSG"
+      # Extract "name (pid N)" from lines like "Killed process 4121 (rspamd) total-vm:..."
+      KILLS=$(echo "$OOM_MSG" | sed -n 's/.*[Kk]illed process \([0-9]*\) (\([^)]*\)).*/\2 (pid \1)/p')
+      if [ -n "$KILLS" ]; then
+        COUNT=$(echo "$KILLS" | wc -l)
+        LIST=$(echo "$KILLS" | paste -sd ',' | sed 's/,/, /g')
+        echo "OOM killer fired $COUNT time(s) in the last $WINDOW. Killed: $LIST"
+      else
+        echo "OOM activity in kernel log in the last $WINDOW: $(echo "$OOM_MSG" | head -n 1)"
+      fi
       exit 1
     fi
 
+    echo "OOM check OK: no kills in the last $WINDOW"
     exit 0
   '';
 
@@ -66,18 +78,20 @@ let
     SERVICE="$1"
 
     # Check if service is active
-    if ! ${pkgs.systemd}/bin/systemctl is-active --quiet "$SERVICE"; then
-      echo "$SERVICE is not active"
+    STATE=$(${pkgs.systemd}/bin/systemctl is-active "$SERVICE")
+    if [ "$STATE" != "active" ]; then
+      echo "$SERVICE is not active (state: $STATE)"
       exit 1
     fi
 
     # Check if service has been restarted (indicates a past crash)
     RESTARTS=$(${pkgs.systemd}/bin/systemctl show "$SERVICE" -p NRestarts --value)
     if [ "$RESTARTS" -gt 0 ]; then
-      echo "$SERVICE has restarted $RESTARTS time(s) - clear with: systemctl reset-failed $SERVICE"
+      echo "$SERVICE has restarted $RESTARTS time(s). Clear with: systemctl reset-failed $SERVICE"
       exit 2
     fi
 
+    echo "$SERVICE is active, no restarts"
     exit 0
   '';
 
@@ -128,6 +142,20 @@ ${lib.optionalString (cfg.alert.email != "") ''
 
     # Alert recipient (repeat alerts while problem persists)
     set alert ${cfg.alert.email} with reminder on ${toString cfg.alert.reminderCycles} cycles
+
+    # Alert email format: subject leads with host and check name for easy inbox scanning
+    set mail-format {
+      from: monit@$HOST
+      subject: [$HOST] $SERVICE: $EVENT
+      message: $SERVICE on $HOST: $EVENT
+
+$DESCRIPTION
+
+Time:   $DATE
+Action: $ACTION
+
+To investigate: monit status $SERVICE
+    }
 
     # Event queue for when mail server is temporarily unavailable
     set eventqueue
@@ -223,11 +251,11 @@ in
       targets = lib.mkOption {
         type = lib.types.attrsOf lib.types.str;
         default = {
-          rootfs = "/";
+          root = "/";
           data = "/data";
         };
-        example = { rootfs = "/"; data = "/data"; };
-        description = "Filesystems to monitor (name = path)";
+        example = { root = "/"; data = "/data"; };
+        description = "Filesystems to monitor (name = path). Checks are named disk-<name>.";
       };
 
       spaceThreshold = lib.mkOption {
